@@ -12,6 +12,10 @@
   <a href="https://github.com/doocs/md"><img src="https://img.shields.io/badge/Powered%20by-doocs%2Fmd-orange.svg" alt="doocs/md"></a>
 </p>
 
+<p align="center">
+  <img src="assets/demo.gif" alt="wechat-md-mcp 演示动图" width="100%">
+</p>
+
 ---
 
 ## 目录
@@ -382,6 +386,8 @@ curl -X POST http://127.0.0.1:8788/load \
 
 ```
 wechat-md-mcp/
+├── assets/
+│   └── demo.gif          # 项目实操演示动图
 ├── bin/
 │   └── md-mcp            # MCP 专用 Shell 启动器（自动探测环境与清理脏变量）
 ├── web/                  # 可视化编辑器（原生 HTML/CSS/JS，无需编译构建）
