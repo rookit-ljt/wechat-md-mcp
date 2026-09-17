@@ -5,6 +5,12 @@ build/
 # Generated previews from test/build-preview.ts
 outputs/
 
+# Per-user format settings saved from the visual editor
+.editor-state.json
+
+# Backup written by the editor before overwriting a .md
+*.bak
+
 .DS_Store
 Thumbs.db
 *.log

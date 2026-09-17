@@ -96,6 +96,7 @@ args = []
 | `save_html` | 把 HTML 落盘 |
 | `preview_html` | 存到临时文件并用浏览器打开 |
 | `copy_to_clipboard` | 写入 macOS 剪贴板，回公众号后台 Cmd+V |
+| `open_editor` | 拉起可视化编辑器并用浏览器打开，传 `path` 直接打开某篇 `.md` |
 
 典型流程：`render_markdown` → `copy_to_clipboard` → 公众号后台 Cmd+V。
 
@@ -161,6 +162,25 @@ MCP 和 Skill 都装好之后，不用记工具名，说人话就行：
 
 更多分客户端的细节见 [docs/客户端接入.md](docs/客户端接入.md)。
 
+## 可视化编辑器
+
+起服务后浏览器打开 <http://127.0.0.1:8788/>：
+
+```bash
+npm start
+```
+
+三栏：左边写 Markdown，中间 390px 手机宽度实时预览，右边调格式。改动 250ms 防抖后自动重渲染。
+
+- **打开 / 保存**：点「打开 .md」填绝对路径，或把文件拖进编辑区（拖拽只能拿到内容，没有路径，保存时会再问一次）。`Cmd/Cmd+S` 保存，每次保存前会把原文件备份成 `.bak`。
+- **内联模式开关**：预览默认**不内联**（保留 `<style>`），因为 juice 内联会丢掉伪元素和媒体查询，看版式反而失真。勾上「内联模式」才是真正粘进微信后的样子——粘之前建议切过去确认一次。
+- **本地图片**：预览会把 `.md` 所在目录下的本地图转成 data URI 显示出来，否则全是裂图。**这只对预览有效**，微信不吃 data URI，发布前还是要传图床。
+- **三个导出按钮**：复制富文本（服务端 osascript 写剪贴板，最可靠）、保存 HTML（浏览器下载）、浏览器预览（系统默认浏览器打开）。
+
+右边调完格式点**「保存为默认」**，配置落到服务目录的 `.editor-state.json`。之后 HTTP 接口和 MCP 工具渲染任何文章都会**默认沿用这份配置**，不用每次传参；显式传的参数仍然优先。
+
+不引前端构建工具：页面是原生 HTML/CSS/JS 三个文件，由同一个 Node 进程托管，不加依赖、不需要 build。
+
 ## 渲染参数
 
 `render_markdown` 与 `POST /render` 接受同一套参数：
@@ -203,6 +223,8 @@ env -u NODE_OPTIONS npx tsx test/smoke.ts
 
 **没有草稿箱发布。** 个人订阅号的接口权限通常拿不到，实测剪贴板粘贴更稳。
 
+**编辑器的 `/open` `/save` 能读写本机任意路径。** 这是它存在的前提（否则浏览器打不开本地 `.md`），代价是本机任何进程都能通过这两个接口读写文件。服务只监听 `127.0.0.1`，**不要**把它转发到局域网或公网，也不要改成监听 `0.0.0.0`。保存时会先备份 `.bak`，但仍是一次覆盖写。
+
 **改 `vendor/` 下的代码时注意 import 写法。** 为了精简，vendored 副本删掉了部分文件和入口，裸 `import '@md/shared'` 会失败，请用 `@md/shared/configs`、`@md/shared/types`、`@md/shared/utils` 这类子路径——上游 core 本来就是这么写的。上游版本与更新方式见 [vendor/doocs-md/UPSTREAM.md](vendor/doocs-md/UPSTREAM.md)。
 
 ## 项目结构
@@ -214,6 +236,7 @@ env -u NODE_OPTIONS npx tsx test/smoke.ts
 ├── run-server.mjs     # HTTP 入口
 ├── polyfill.mjs       # core 会碰到的浏览器 API 补丁
 ├── src/               # 渲染管线、HTTP 接口、MCP 工具定义
+├── web/               # 可视化编辑器（原生三文件，无构建步骤）
 ├── skills/wechat-md/  # SKILL.md，告诉各 agent 怎么用这套工具
 ├── scripts/           # skill 的安装/卸载脚本
 ├── docs/              # 各 MCP 客户端的接入配置

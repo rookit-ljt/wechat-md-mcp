@@ -1,12 +1,19 @@
 import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { execFile } from 'node:child_process'
 import { McpServer } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { z } from 'zod'
+import { spawn } from 'node:child_process'
 import { copyHtmlToClipboard } from './clipboard'
 import { renderWechatHtml, THEMES } from './render'
+import { omitBlanks, readState, stateFilePath } from './state'
+
+const SERVICE_PORT = Number(process.env.MD_SERVICE_PORT || 8788)
+const SERVICE_HOST = process.env.MD_SERVICE_HOST || '127.0.0.1'
+const ROOT = path.resolve(import.meta.dirname, '..')
 
 function jsonText(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data) }] }
@@ -55,7 +62,10 @@ server.registerTool(
         return jsonText({ error: { code: 'missing_input', message: 'Provide `markdown` or `path`.' } })
       markdown = await fs.readFile(args.path, 'utf-8')
     }
-    const result = await renderWechatHtml({ ...args, markdown })
+    // Brand settings saved from the visual editor act as defaults; explicit
+    // arguments still win.
+    const saved = omitBlanks(await readState())
+    const result = await renderWechatHtml({ ...saved, ...args, markdown })
     return jsonText(result)
   },
 )
@@ -117,6 +127,68 @@ server.registerTool(
   async (args: any) => {
     await copyHtmlToClipboard(args.html)
     return textResult('HTML copied to clipboard. Switch to the WeChat editor and press Cmd+V.')
+  },
+)
+
+async function serviceAlive(): Promise<boolean> {
+  try {
+    const res = await fetch(`http://${SERVICE_HOST}:${SERVICE_PORT}/health`, {
+      signal: AbortSignal.timeout(1500),
+    })
+    return res.ok
+  }
+  catch {
+    return false
+  }
+}
+
+function startService(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tsxBin = path.join(ROOT, 'node_modules', '.bin', 'tsx')
+    const useBin = fsSync.existsSync(tsxBin)
+    const child = spawn(
+      useBin ? tsxBin : process.execPath,
+      useBin ? [path.join(ROOT, 'run-server.mjs')] : ['--import', 'tsx', path.join(ROOT, 'run-server.mjs')],
+      { cwd: ROOT, detached: true, stdio: 'ignore' },
+    )
+    child.on('error', reject)
+    child.unref()
+
+    // Poll until the HTTP server answers, so the browser never hits a dead port.
+    const deadline = Date.now() + 15_000
+    const tick = setInterval(async () => {
+      if (await serviceAlive()) {
+        clearInterval(tick)
+        resolve()
+      }
+      else if (Date.now() > deadline) {
+        clearInterval(tick)
+        reject(new Error('Editor service did not start within 15s.'))
+      }
+    }, 400)
+  })
+}
+
+server.registerTool(
+  'open_editor',
+  {
+    description:
+      'Open the local visual editor in the browser: Markdown on the left, a 390px '
+      + 'WeChat-width preview in the middle, format controls on the right. Format settings '
+      + 'saved there become the default for every later render. Pass `path` to open a .md file.',
+    inputSchema: z.object({
+      path: z.string().optional().describe('Absolute path to a local .md file to open.'),
+    }),
+  },
+  async (args: any) => {
+    if (!await serviceAlive())
+      await startService()
+
+    const url = args.path
+      ? `http://${SERVICE_HOST}:${SERVICE_PORT}/?path=${encodeURIComponent(path.resolve(args.path))}`
+      : `http://${SERVICE_HOST}:${SERVICE_PORT}/`
+    execFile('open', [url])
+    return textResult(`Editor opened: ${url}\nFormat defaults are stored in ${stateFilePath()}`)
   },
 )
 

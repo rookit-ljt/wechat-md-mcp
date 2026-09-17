@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>公众号排版编辑器</title>
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="file">
+    <span class="dot" id="dirty" title="未保存"></span>
+    <span id="filename">未打开文件</span>
+    <span class="path" id="filepath"></span>
+  </div>
+  <div class="actions">
+    <button id="btn-open">打开 .md</button>
+    <button id="btn-save">保存</button>
+    <span class="sep"></span>
+    <button id="btn-copy" class="primary">复制富文本</button>
+    <button id="btn-html">保存 HTML</button>
+    <button id="btn-preview">浏览器预览</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <section class="pane editor-pane">
+    <div class="pane-head">
+      <span>Markdown</span>
+      <div class="toolbar">
+        <button data-insert="## ">H2</button>
+        <button data-insert="### ">H3</button>
+        <button data-wrap="**">粗体</button>
+        <button data-wrap="*">斜体</button>
+        <button data-prefix="> ">引用</button>
+        <button data-wrap="`">代码</button>
+        <button data-block="```\n\n```">代码块</button>
+        <button data-prefix="- ">列表</button>
+        <button data-insert="[文字](https://)">链接</button>
+        <button data-insert="![](./images/)">图片</button>
+        <button data-insert="\n---\n">分割线</button>
+      </div>
+    </div>
+    <textarea id="editor" spellcheck="false" placeholder="在这里写 Markdown，或点「打开 .md」载入本地文件"></textarea>
+    <div class="status" id="status">就绪</div>
+  </section>
+
+  <section class="pane preview-pane">
+    <div class="pane-head">
+      <span>预览</span>
+      <label class="inline-toggle">
+        <input type="checkbox" id="inline-mode">
+        内联模式（看真实粘贴效果）
+      </label>
+    </div>
+    <div class="phone">
+      <iframe id="preview" title="预览"></iframe>
+    </div>
+  </section>
+
+  <section class="pane config-pane">
+    <div class="pane-head">
+      <span>格式</span>
+      <button id="btn-save-config" class="mini">保存为默认</button>
+    </div>
+    <div class="config-body">
+
+      <div class="field">
+        <label>主题</label>
+        <select id="cfg-theme">
+          <option value="default">经典</option>
+          <option value="grace">优雅</option>
+          <option value="simple">简洁</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>主色</label>
+        <div class="color-row">
+          <input type="color" id="cfg-primaryColor">
+          <input type="text" id="cfg-primaryColorText" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="field row">
+        <div>
+          <label>字号</label>
+          <input type="text" id="cfg-fontSize" spellcheck="false">
+        </div>
+        <div>
+          <label>行高</label>
+          <input type="text" id="cfg-lineHeight" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>代码块主题</label>
+        <select id="cfg-codeBlockTheme">
+          <option value="">默认（github）</option>
+          <option value="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css">github-dark</option>
+          <option value="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/atom-one-light.min.css">atom-one-light</option>
+          <option value="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/atom-one-dark.min.css">atom-one-dark</option>
+          <option value="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/vs2015.min.css">vs2015</option>
+          <option value="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/xcode.min.css">xcode</option>
+        </select>
+      </div>
+
+      <div class="checks">
+        <label><input type="checkbox" id="cfg-isMacCodeBlock"> macOS 代码块</label>
+        <label><input type="checkbox" id="cfg-isShowLineNumber"> 代码行号</label>
+        <label><input type="checkbox" id="cfg-citeStatus"> 链接转脚注</label>
+        <label><input type="checkbox" id="cfg-countStatus"> 字数统计</label>
+        <label><input type="checkbox" id="cfg-isUseIndent"> 首行缩进</label>
+        <label><input type="checkbox" id="cfg-isUseJustify"> 两端对齐</label>
+      </div>
+
+      <div class="field grow">
+        <label>自定义 CSS</label>
+        <textarea id="cfg-customCSS" spellcheck="false" placeholder="追加在最后的 CSS，优先级最高"></textarea>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<script src="/web/app.js"></script>
+</body>
+</html>

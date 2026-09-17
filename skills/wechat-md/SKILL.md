@@ -27,14 +27,16 @@ render_markdown  { path 或 markdown, ...格式参数 }
 copy_to_clipboard { html }     ← macOS，写 public.html flavor
 ```
 
-工具清单：`render_markdown` / `list_themes` / `save_html` / `preview_html` / `copy_to_clipboard`。
+工具清单：`render_markdown` / `list_themes` / `save_html` / `preview_html` / `copy_to_clipboard` / `open_editor`。
+
+`open_editor` 会拉起本地可视化编辑器（左 Markdown / 中 390px 预览 / 右格式面板）并用浏览器打开，传 `path` 直接打开某篇 `.md`。用户想**自己看着调**时用这个，不要自己猜参数。
 
 ### 通过 HTTP 兜底
 
 在仓库根目录起服务（后台运行）：
 
 ```
-npm start                      # 默认 127.0.0.1:8788
+npm start                      # 默认 127.0.0.1:8788，浏览器打开这个地址就是可视化编辑器
 ```
 
 然后：
@@ -57,7 +59,7 @@ env -u NODE_OPTIONS CODEBUDDY_BROKERED_FS_HOOK_ENABLED=0 npm start
 
 ## 工作流
 
-1. **定格式参数**。目前没有持久化的品牌配置机制——用下面那套默认值，用户明确说了配色/主题/字号再覆盖，不要自作主张替他挑。
+1. **定格式参数**。先看 `.editor-state.json`（服务目录下）有没有用户在可视化编辑器里调好并保存的品牌样式——**有就直接沿用**，不要自作主张重设。没有就用下面那套默认值，或问用户。
 2. **渲染**。传 `path` 比传 `markdown` 好——长文本走参数容易撞 ARG_MAX。
 3. **落盘一份**。渲染完顺手 `save_html`，别只留在对话里。HTML 动辄 8KB 以上，糊在上下文里没意义。
 4. **复制**。`copy_to_clipboard`，然后告诉用户去公众号后台 Cmd+V。
