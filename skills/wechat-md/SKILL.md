@@ -29,7 +29,7 @@ copy_to_clipboard { html }     ← macOS，写 public.html flavor
 
 工具清单：`render_markdown` / `list_themes` / `save_html` / `preview_html` / `copy_to_clipboard` / `open_editor`。
 
-`open_editor` 会拉起本地可视化编辑器（左 Markdown / 中 390px 预览 / 右格式面板）并用浏览器打开，传 `path` 直接打开某篇 `.md`。用户想**自己看着调**时用这个，不要自己猜参数。
+`open_editor` 拉起本地可视化编辑器（左 Markdown / 中 390px 预览 / 右格式面板），传 `path` 直接打开某篇 `.md`，传 `markdown` 则先落盘再打开。**渲染完默认走这个**，详见「渲染完把编辑器交给用户」。格式参数拿不准时用它让用户自己调，别自己猜。
 
 ### 通过 HTTP 兜底
 
@@ -62,8 +62,43 @@ env -u NODE_OPTIONS CODEBUDDY_BROKERED_FS_HOOK_ENABLED=0 npm start
 1. **定格式参数**。先看 `.editor-state.json`（服务目录下）有没有用户在可视化编辑器里调好并保存的品牌样式——**有就直接沿用**，不要自作主张重设。没有就用下面那套默认值，或问用户。
 2. **渲染**。传 `path` 比传 `markdown` 好——长文本走参数容易撞 ARG_MAX。
 3. **落盘一份**。渲染完顺手 `save_html`，别只留在对话里。HTML 动辄 8KB 以上，糊在上下文里没意义。
-4. **复制**。`copy_to_clipboard`，然后告诉用户去公众号后台 Cmd+V。
-5. **检查图片**。扫一遍渲染结果里的 `<img src>`，只要是本地路径或 `data:` 开头，明确告诉用户**这些图在微信里不会显示**。
+4. **把编辑器交给用户**（见下）。这是标准收尾，不是可选项。
+5. **等用户反馈再复制**。用户在编辑器里改完、说"好了"之后，再 `copy_to_clipboard` 并提示去公众号后台 Cmd+V。用户明确说"直接复制"时才跳过第 4 步。
+6. **检查图片**。扫一遍渲染结果里的 `<img src>`，只要是本地路径或 `data:` 开头，明确告诉用户**这些图在微信里不会显示**。
+
+## 渲染完把编辑器交给用户
+
+排版不是终点。渲染完用户得**看得见、改得动**，只在对话里丢一段 HTML 等于没交付。
+
+**第一步，把内容递给编辑器**（MCP）：
+
+```
+open_editor { path: "/abs/article.md" }        # 文件在磁盘上，首选，用户改完能直接存回去
+open_editor { markdown, name }                 # 内容在对话里，会先落到 outputs/<name>.md
+open_editor { path, open: false }              # 只取 URL，不弹系统浏览器
+```
+
+返回 `{ url, path, port }`——`url` 就是带着这篇文章的编辑器地址。
+
+**第二步，决定在哪打开**：
+
+| 客户端 | 做法 |
+| --- | --- |
+| 有侧边/内嵌预览面板的（WorkBuddy 等） | 用你的网页展示能力（WorkBuddy 是 `present_files`）打开 `url`——页面嵌在对话右侧，用户不用切窗口。**优先这条** |
+| Claude Desktop / Codex / Cursor | `open: true`（默认），系统浏览器打开 |
+| 没有 MCP | 走下面 HTTP 兜底 |
+
+**第三步，拿回改动**。用户在编辑器里改完点「保存」，内容写回 `path` 指向的 `.md`。之后你要重新排版就读这个文件——别用对话里那份旧文本。
+
+HTTP 兜底（没 MCP 时同样能开编辑器）：
+
+```
+curl -s -X POST http://127.0.0.1:8788/load \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/abs/article.md"}'            # 或用 {"markdown":"...","name":"article"}
+```
+
+返回的 `url` 字段直接打开即可；服务没起就先 `npm start`。端口可能因为占用往后挪，以 `/health` 或 `/load` 返回的 `port` 为准，别硬编码 8788。
 
 ## 参数
 

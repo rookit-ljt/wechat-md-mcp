@@ -12,6 +12,44 @@ import { omitBlanks, readState, stateFilePath, writeState } from './state'
 const PORT = Number(process.env.MD_SERVICE_PORT || 8788)
 const HOST = process.env.MD_SERVICE_HOST || '127.0.0.1'
 const WEB_DIR = path.resolve(import.meta.dirname, '../web')
+const ROOT = path.resolve(import.meta.dirname, '..')
+/** Where markdown handed over by an agent lands, so the editor can save back to it. */
+const OUT_DIR = path.resolve(ROOT, 'outputs')
+/** The port actually bound (it walks forward on conflict), republished for the MCP side. */
+const PORT_FILE = path.resolve(ROOT, '.service-port.json')
+
+export function editorUrl(file?: string, from = 'agent'): string {
+  const base = `http://${HOST}:${boundPort}/`
+  if (!file)
+    return base
+  const qs = new URLSearchParams({ path: file })
+  if (from)
+    qs.set('from', from)
+  return `${base}?${qs}`
+}
+
+/** Strips anything that would escape the output directory or break the filesystem. */
+function safeName(name: string): string {
+  const cleaned = String(name || '')
+    .replace(/[\\/:*?"<>|\n\r\t]/g, '-')
+    .replace(/^\.+/, '')
+    .trim()
+    .slice(0, 60)
+  return cleaned || `article-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`
+}
+
+function uniquePath(target: string): string {
+  if (!fsSync.existsSync(target))
+    return target
+  const ext = path.extname(target)
+  const stem = target.slice(0, target.length - ext.length)
+  for (let i = 2; i < 200; i++) {
+    const candidate = `${stem}-${i}${ext}`
+    if (!fsSync.existsSync(candidate))
+      return candidate
+  }
+  return `${stem}-${Date.now()}${ext}`
+}
 
 const STATIC_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -91,7 +129,14 @@ const server = http.createServer(async (req, res) => {
 
     // ---- existing API ----
     if (url.pathname === '/health' && req.method === 'GET')
-      return send(res, 200, { ok: true, service: 'wechat-md-mcp', uptime: process.uptime() })
+      return send(res, 200, {
+        ok: true,
+        service: 'wechat-md-mcp',
+        uptime: process.uptime(),
+        port: boundPort,
+        host: HOST,
+        url: editorUrl(),
+      })
 
     if (url.pathname === '/themes' && req.method === 'GET')
       return send(res, 200, { themes: THEMES })
@@ -112,6 +157,37 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { ...result, images: { inlined, missing } })
       }
       return send(res, 200, result)
+    }
+
+    // ---- hand content to the editor ----
+    // An agent finishes rendering and wants the user to eyeball and tweak the
+    // result. Either reuse the file already on disk, or persist the markdown
+    // from the conversation so the editor has something to save back to.
+    if (url.pathname === '/load' && req.method === 'POST') {
+      const { markdown, path: target, name } = await readBody(req)
+
+      let absolute: string
+      if (target) {
+        absolute = path.resolve(target)
+        if (!fsSync.existsSync(absolute))
+          return send(res, 404, bad(`File not found: ${absolute}`))
+      }
+      else if (typeof markdown === 'string' && markdown.trim()) {
+        await fs.mkdir(OUT_DIR, { recursive: true })
+        absolute = uniquePath(path.join(OUT_DIR, `${safeName(name)}.md`))
+        await fs.writeFile(absolute, markdown, 'utf-8')
+      }
+      else {
+        return send(res, 400, bad('Provide `path` or `markdown`.'))
+      }
+
+      return send(res, 200, {
+        path: absolute,
+        name: path.basename(absolute),
+        baseDir: path.dirname(absolute),
+        url: editorUrl(absolute),
+        port: boundPort,
+      })
     }
 
     // ---- editor support ----
@@ -203,8 +279,17 @@ function listen(port: number, attempt = 0) {
   })
   server.listen(port, HOST, () => {
     boundPort = port
+    // The port can walk forward on conflict — publish it so MCP clients don't
+    // have to guess which one to talk to.
+    try {
+      fsSync.writeFileSync(PORT_FILE, `${JSON.stringify({ port, host: HOST, pid: process.pid }, null, 2)}\n`)
+    }
+    catch {
+      // non-fatal: clients fall back to scanning
+    }
     process.stdout.write(`[wechat-md-mcp] listening on http://${HOST}:${port}\n`)
     process.stdout.write(`[wechat-md-mcp] editor    http://${HOST}:${port}/\n`)
+    process.stdout.write(`[wechat-md-mcp] POST /load  {"path"|"markdown"} -> editor url\n`)
     process.stdout.write(`[wechat-md-mcp] POST /render  {"markdown"|"path", theme, inline}\n`)
     process.stdout.write(`[wechat-md-mcp] GET  /themes  GET /health\n`)
   })

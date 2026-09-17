@@ -130,9 +130,11 @@ server.registerTool(
   },
 )
 
-async function serviceAlive(): Promise<boolean> {
+const PORT_FILE = path.join(ROOT, '.service-port.json')
+
+async function aliveOn(port: number): Promise<boolean> {
   try {
-    const res = await fetch(`http://${SERVICE_HOST}:${SERVICE_PORT}/health`, {
+    const res = await fetch(`http://${SERVICE_HOST}:${port}/health`, {
       signal: AbortSignal.timeout(1500),
     })
     return res.ok
@@ -140,6 +142,30 @@ async function serviceAlive(): Promise<boolean> {
   catch {
     return false
   }
+}
+
+async function serviceAlive(): Promise<boolean> {
+  return (await resolvePort()) !== null
+}
+
+/**
+ * The HTTP server walks forward when 8788 is taken, so never assume it. Read the
+ * port file it published, otherwise scan the small range it can land in.
+ */
+async function resolvePort(): Promise<number | null> {
+  try {
+    const saved = Number(JSON.parse(await fs.readFile(PORT_FILE, 'utf-8'))?.port)
+    if (saved && await aliveOn(saved))
+      return saved
+  }
+  catch {
+    // no port file yet, fall through to scanning
+  }
+  for (let p = SERVICE_PORT; p < SERVICE_PORT + 11; p++) {
+    if (await aliveOn(p))
+      return p
+  }
+  return null
 }
 
 function startService(): Promise<void> {
@@ -157,7 +183,7 @@ function startService(): Promise<void> {
     // Poll until the HTTP server answers, so the browser never hits a dead port.
     const deadline = Date.now() + 15_000
     const tick = setInterval(async () => {
-      if (await serviceAlive()) {
+      if (await resolvePort()) {
         clearInterval(tick)
         resolve()
       }
@@ -169,26 +195,84 @@ function startService(): Promise<void> {
   })
 }
 
+/** Brings the editor service up if needed and returns the live port. */
+async function ensureService(): Promise<number> {
+  const live = await resolvePort()
+  if (live)
+    return live
+  await startService()
+  const after = await resolvePort()
+  if (!after)
+    throw new Error('Editor service did not come up. Run `npm start` in the repo and retry.')
+  return after
+}
+
+async function postJson<T = any>(route: string, body: unknown): Promise<T> {
+  const res = await fetch(route, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = await res.json() as any
+  if (!res.ok || data?.error)
+    throw new Error(data?.error?.message || `${route} failed`)
+  return data as T
+}
+
 server.registerTool(
   'open_editor',
   {
     description:
-      'Open the local visual editor in the browser: Markdown on the left, a 390px '
-      + 'WeChat-width preview in the middle, format controls on the right. Format settings '
-      + 'saved there become the default for every later render. Pass `path` to open a .md file.',
+      'Hand the article to the local visual editor so the user can read and tweak it: '
+      + 'Markdown on the left, a 390px WeChat-width preview in the middle, format controls '
+      + 'on the right. Call this after rendering — do not just dump HTML into the chat. '
+      + 'Returns the editor URL: if your client has an inline/side preview panel, open that URL '
+      + 'there instead of a system browser so the user stays in the conversation. '
+      + 'Editing in the editor and saving writes back to a real .md file on disk; re-render '
+      + 'from that path afterwards to pick up the user\'s changes.',
     inputSchema: z.object({
-      path: z.string().optional().describe('Absolute path to a local .md file to open.'),
+      path: z.string().optional()
+        .describe('Absolute path to a .md file already on disk. Preferred — the editor saves back to it.'),
+      markdown: z.string().optional()
+        .describe('Markdown from the conversation. Written to a file under outputs/ so the editor can edit and save it.'),
+      name: z.string().optional()
+        .describe('Filename (no extension) used when passing `markdown`. Defaults to article-<timestamp>.'),
+      open: z.boolean().optional().default(true)
+        .describe('Open the system browser. Set false to only receive the URL and render it in the client\'s own side panel.'),
     }),
   },
   async (args: any) => {
-    if (!await serviceAlive())
-      await startService()
+    const port = await ensureService()
+    const base = `http://${SERVICE_HOST}:${port}`
 
-    const url = args.path
-      ? `http://${SERVICE_HOST}:${SERVICE_PORT}/?path=${encodeURIComponent(path.resolve(args.path))}`
-      : `http://${SERVICE_HOST}:${SERVICE_PORT}/`
-    execFile('open', [url])
-    return textResult(`Editor opened: ${url}\nFormat defaults are stored in ${stateFilePath()}`)
+    let file: string | null = null
+    let written = false
+    if (args.path) {
+      const loaded = await postJson(`${base}/load`, { path: path.resolve(args.path) })
+      file = loaded.path
+    }
+    else if (args.markdown) {
+      const loaded = await postJson(`${base}/load`, { markdown: args.markdown, name: args.name })
+      file = loaded.path
+      written = true
+    }
+
+    const query = file ? `?path=${encodeURIComponent(file)}&from=agent` : '?from=agent'
+    const url = `${base}/${query}`
+
+    if (args.open !== false)
+      execFile('open', [url])
+
+    return jsonText({
+      url,
+      path: file,
+      port,
+      written,
+      opened: args.open !== false,
+      hint: args.open === false
+        ? 'Open `url` in your client\'s inline/side preview panel. When the user is done, they save in the editor, then re-render from `path`.'
+        : `Editor opened in the system browser. If your client has a side preview panel, prefer opening \`url\` there. Saved format defaults live in ${stateFilePath()}`,
+    })
   },
 )
 

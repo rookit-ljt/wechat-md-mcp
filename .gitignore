@@ -8,6 +8,9 @@ outputs/
 # Per-user format settings saved from the visual editor
 .editor-state.json
 
+# Port the service actually bound to (read by the MCP server)
+.service-port.json
+
 # Backup written by the editor before overwriting a .md
 *.bak
 

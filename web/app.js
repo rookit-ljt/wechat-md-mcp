@@ -350,10 +350,26 @@ function bindGlobal() {
   })
 }
 
+/**
+ * Shown only when an agent handed the article over. Without it the user has no
+ * idea the page is live-editable or that saving is what feeds back to the agent.
+ */
+function maybeShowAgentBanner() {
+  const params = new URLSearchParams(location.search)
+  if (!params.has('from'))
+    return
+  const banner = $('agent-banner')
+  banner.hidden = false
+  $('banner-close').addEventListener('click', () => {
+    banner.hidden = true
+  })
+}
+
 async function main() {
   bindConfig()
   bindToolbar()
   bindGlobal()
+  maybeShowAgentBanner()
 
   try {
     await loadConfig()

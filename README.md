@@ -33,9 +33,10 @@ MD_SERVICE_PORT=9000 npm start # 改端口
 
 | 接口 | 方法 | 说明 |
 | --- | --- | --- |
-| `/health` | GET | 健康检查 |
+| `/health` | GET | 健康检查，返回实际端口 |
 | `/themes` | GET | 内置主题列表 |
 | `/render` | POST | 渲染，参数见下表 |
+| `/load` | POST | 把文章交给编辑器，返回可直接打开的编辑器 URL |
 
 `markdown` 和 `path` 给任意一个即可，后者是本地 `.md` 文件路径。
 
@@ -50,6 +51,20 @@ curl -X POST http://127.0.0.1:8788/render \
 ```json
 { "html": "...", "frontMatter": {}, "readingTime": { "words": 9, "minutes": 0.045 } }
 ```
+
+`POST /load` 是给 agent 用的收尾接口：把文章塞进编辑器，拿回一个能直接打开的 URL。传 `path` 就复用磁盘上的文件（用户在编辑器里保存会写回原文件）；传 `markdown` 则先落到 `outputs/<name>.md`，这样编辑器才有东西可存。
+
+```bash
+curl -X POST http://127.0.0.1:8788/load \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/abs/article.md"}'
+```
+
+```json
+{ "path": "/abs/article.md", "url": "http://127.0.0.1:8788/?path=%2Fabs%2Farticle.md&from=agent", "port": 8788 }
+```
+
+端口被占用时会往后挪，所以别硬编码 8788——以 `/health` 或 `/load` 返回的 `port` 为准。
 
 ## MCP 服务
 
@@ -131,8 +146,11 @@ MCP 和 Skill 都装好之后，不用记工具名，说人话就行：
 
 1. 渲染（优先传文件路径，长文本走参数容易撞 ARG_MAX）
 2. `save_html` 落盘一份，不把大段 HTML 糊在对话里
-3. `copy_to_clipboard`，然后告诉你可以去公众号后台 Cmd+V
-4. 扫一遍 `<img src>`，发现本地路径会提醒你先传图床
+3. **把编辑器交给用户**：`open_editor` 打开带这篇文章的编辑器。有侧边预览面板的客户端（比如 WorkBuddy）会把页面嵌在对话右侧，你就在对话里看着改
+4. 你在编辑器里改完点「保存」，回对话说一声，它才 `copy_to_clipboard`，然后告诉你可以去公众号后台 Cmd+V
+5. 扫一遍 `<img src>`，发现本地路径会提醒你先传图床
+
+第 3 步不是可选项——排版完不给看，等于没交付。想跳过就直接说「渲染完直接复制」。
 
 想精确控制就直接点名：
 
@@ -178,6 +196,15 @@ npm start
 - **三个导出按钮**：复制富文本（服务端 osascript 写剪贴板，最可靠）、保存 HTML（浏览器下载）、浏览器预览（系统默认浏览器打开）。
 
 右边调完格式点**「保存为默认」**，配置落到服务目录的 `.editor-state.json`。之后 HTTP 接口和 MCP 工具渲染任何文章都会**默认沿用这份配置**，不用每次传参；显式传的参数仍然优先。
+
+### 由 agent 打开
+
+排版完成后 `open_editor`（或 `POST /load`）会返回一个带 `?path=...&from=agent` 的 URL。页面认这个参数：直接载入那篇文章，顶部显示一条提示条告诉你改完点保存、再回对话说一声。
+
+- **有侧边预览面板的客户端**（WorkBuddy 等）：把 URL 交给内嵌面板，页面开在对话右侧，不用来回切窗口
+- **其他客户端**：`open_editor` 默认用系统浏览器打开；传 `open: false` 可以只拿 URL、自己决定怎么展示
+
+窄面板（< 1100px）下三栏会自动改成纵向堆叠并允许滚动，嵌在侧边栏里也不会挤成一团。
 
 不引前端构建工具：页面是原生 HTML/CSS/JS 三个文件，由同一个 Node 进程托管，不加依赖、不需要 build。
 
