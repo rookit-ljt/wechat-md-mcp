@@ -53,13 +53,14 @@ curl -X POST http://127.0.0.1:8788/render \
 
 ## MCP 服务
 
-WorkBuddy、Codex、Claude Desktop、Claude Code 都支持，共用同一个入口 `bin/md-mcp`，区别只在配置文件的位置和格式：
+WorkBuddy、Codex、Cursor、Claude Desktop、Claude Code 都支持，共用同一个入口 `bin/md-mcp`，区别只在配置文件的位置和格式：
 
 | 客户端 | 配置位置 | 格式 |
 | --- | --- | --- |
 | Codex | `~/.codex/config.toml` | TOML |
+| Cursor | `~/.cursor/mcp.json` | JSON |
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | JSON |
-| Claude Code | 项目根目录 `.mcp.json`，或 `claude mcp add` | JSON |
+| Claude Code | `~/.claude.json`，或项目根目录 `.mcp.json`，或 `claude mcp add` | JSON |
 | WorkBuddy | `~/.workbuddy/mcp.json` | JSON |
 
 JSON 类（WorkBuddy / Claude）的写法：
@@ -97,6 +98,17 @@ args = []
 | `copy_to_clipboard` | 写入 macOS 剪贴板，回公众号后台 Cmd+V |
 
 典型流程：`render_markdown` → `copy_to_clipboard` → 公众号后台 Cmd+V。
+
+### 顺手装一下 Skill
+
+MCP 只给 agent 工具，不告诉它什么时候用、按什么顺序用。`skills/wechat-md/SKILL.md` 补这一层，格式是几家 agent 通用的：
+
+```bash
+SKILL=/path/to/wechat-md-mcp/skills/wechat-md
+for d in ~/.claude ~/.codex ~/.cursor ~/.workbuddy; do ln -s "$SKILL" "$d/skills/wechat-md"; done
+```
+
+装完之后直接说「把这篇排版成公众号格式」就行，它会自己去读品牌配置、渲染、复制，不用你复述流程。只装 Skill 也能用——里面写了 HTTP 兜底路径。
 
 ## 渲染参数
 
@@ -151,6 +163,7 @@ env -u NODE_OPTIONS npx tsx test/smoke.ts
 ├── run-server.mjs     # HTTP 入口
 ├── polyfill.mjs       # core 会碰到的浏览器 API 补丁
 ├── src/               # 渲染管线、HTTP 接口、MCP 工具定义
+├── skills/wechat-md/  # SKILL.md，告诉各 agent 怎么用这套工具
 ├── docs/              # 各 MCP 客户端的接入配置
 └── test/              # 冒烟测试与预览生成
 ```
