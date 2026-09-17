@@ -104,11 +104,19 @@ args = []
 MCP 只给 agent 工具，不告诉它什么时候用、按什么顺序用。`skills/wechat-md/SKILL.md` 补这一层，格式是几家 agent 通用的：
 
 ```bash
-SKILL=/path/to/wechat-md-mcp/skills/wechat-md
-for d in ~/.claude ~/.codex ~/.cursor ~/.workbuddy; do ln -s "$SKILL" "$d/skills/wechat-md"; done
+npm run install:skill        # 软链到 Claude / Codex / Cursor / WorkBuddy 的 skills 目录
+npm run uninstall:skill      # 移除
+```
+
+没装的 agent 会自动跳过。已存在时默认不覆盖，要重建加 `--force`：
+
+```bash
+sh scripts/install-skill.sh --force
 ```
 
 装完之后直接说「把这篇排版成公众号格式」就行，它会自己去读品牌配置、渲染、复制，不用你复述流程。只装 Skill 也能用——里面写了 HTTP 兜底路径。
+
+用软链而不是复制，是为了改仓库里那一份 SKILL.md 就四家同时生效。
 
 ## 渲染参数
 
@@ -164,6 +172,7 @@ env -u NODE_OPTIONS npx tsx test/smoke.ts
 ├── polyfill.mjs       # core 会碰到的浏览器 API 补丁
 ├── src/               # 渲染管线、HTTP 接口、MCP 工具定义
 ├── skills/wechat-md/  # SKILL.md，告诉各 agent 怎么用这套工具
+├── scripts/           # skill 的安装/卸载脚本
 ├── docs/              # 各 MCP 客户端的接入配置
 └── test/              # 冒烟测试与预览生成
 ```

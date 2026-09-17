@@ -28,7 +28,9 @@
   "scripts": {
     "start": "tsx run-server.mjs",
     "mcp": "tsx run-mcp.mjs",
-    "test": "tsx test/smoke.ts && tsx test/codeblock.ts"
+    "test": "tsx test/smoke.ts && tsx test/codeblock.ts",
+    "install:skill": "sh scripts/install-skill.sh",
+    "uninstall:skill": "sh scripts/install-skill.sh --uninstall"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
