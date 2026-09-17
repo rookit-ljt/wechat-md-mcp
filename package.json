@@ -28,6 +28,7 @@
   "scripts": {
     "start": "tsx run-server.mjs",
     "mcp": "tsx run-mcp.mjs",
+    "editor": "bash scripts/open-sidebar.sh",
     "test": "tsx test/smoke.ts && tsx test/codeblock.ts",
     "install:skill": "sh scripts/install-skill.sh",
     "uninstall:skill": "sh scripts/install-skill.sh --uninstall"

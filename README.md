@@ -98,7 +98,10 @@ npm run mcp          # 以 stdio 模式运行 MCP 服务
 启动服务后，浏览器直接访问：**<http://127.0.0.1:8788/>**
 
 ```bash
-npm start
+npm start                      # 启动服务并在浏览器访问 http://127.0.0.1:8788/
+# 也可以通过固定脚本一键启动并直接打开指定文章：
+npm run editor -- /path/to/article.md
+# 或直接运行：./scripts/open-sidebar.sh /path/to/article.md
 ```
 
 ### 核心功能与亮点
@@ -400,7 +403,8 @@ wechat-md-mcp/
 ├── skills/
 │   └── wechat-md/        # 通用 Agent Skill（定义排版操作 SOP 与规则）
 ├── scripts/
-│   └── install-skill.sh  # Skill 多客户端一键软链/卸载脚本
+│   ├── install-skill.sh  # Skill 多客户端一键软链/卸载脚本
+│   └── open-sidebar.sh   # 一键自启服务并在侧边栏/浏览器打开文章的固定脚本
 ├── test/                 # 冒烟测试、代码块测试与排版预览构建脚本
 └── vendor/
     └── doocs-md/         # 本地裁剪版 doocs/md 官方渲染引擎
