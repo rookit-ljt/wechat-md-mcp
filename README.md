@@ -1,285 +1,424 @@
 # wechat-md-mcp
 
-把 [doocs/md](https://github.com/doocs/md) 的渲染能力搬到命令行和 MCP 里：喂进去 Markdown，吐出来**能直接 Cmd+V 粘进公众号编辑器**的 HTML。
+<p align="center">
+  <strong>本地 Markdown → 微信公众号排版服务（MCP + HTTP + 可视化编辑器）</strong><br>
+  <span>基于 <a href="https://github.com/doocs/md">doocs/md</a> 官方排版内核，喂进 Markdown，吐出<strong>可直接 Cmd+V 粘贴进公众号编辑器的富文本</strong>。</span>
+</p>
 
-渲染用的是 doocs/md 官方内核（`packages/core`），不是重写。
+<p align="center">
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%3E%3D20-brightgreen.svg" alt="Node.js"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/Protocol-MCP-purple.svg" alt="MCP"></a>
+  <a href="https://github.com/doocs/md"><img src="https://img.shields.io/badge/Powered%20by-doocs%2Fmd-orange.svg" alt="doocs/md"></a>
+</p>
 
-## 快速开始
+---
+
+## 目录
+
+- [核心特性](#-核心特性)
+- [工作原理与流转图](#-工作原理与流转图)
+- [快速开始](#-快速开始)
+- [🖥 可视化编辑器](#-可视化编辑器)
+- [🤖 MCP 客户端接入](#-mcp-客户端接入)
+- [🧩 配置 Agent Skill（推荐）](#-配置-agent-skill推荐)
+- [💬 在 Agent 中使用](#-在-agent-中使用)
+- [🌐 HTTP 服务接口](#-http-服务接口)
+- [⚙️ 排版与渲染参数](#-排版与渲染参数)
+- [⚠️ 关键避坑指南与排错](#-关键避坑指南与排错)
+- [📂 项目结构](#-项目结构)
+- [🛠 常用调试命令](#-常用调试命令)
+- [📄 致谢与开源许可](#-致谢与开源许可)
+
+---
+
+## 🌟 核心特性
+
+- 🎯 **一键直达微信剪贴板**：基于 macOS 富文本（`public.html` flavor）注入，排版完成后直接写入系统剪贴板，公众号后台直接 `Cmd+V` 即可完美呈现。
+- 🖥 **内置三栏可视化编辑器**：原生轻量编辑器（零打包构建，开箱即用）。左边写 Markdown、中间 390px 手机宽度实时预览、右边调格式。支持打开/保存本地文件、自动 `.bak` 备份，调好格式点击「保存为默认」，全局所有调用均自动沿用。
+- 🎨 **原汁原味 doocs/md 内核**：直接使用 doocs/md 官方渲染内核（`packages/core`），完整支持代码高亮、Mac 风格标题栏、KaTeX 数学公式、Mermaid 图表、注音、脚注与表格。
+- ⚡️ **样式强制深度内联**：微信公众号后台会静默剔除 `<style>` 样式表和大部分 class 类名。本服务通过 Juice 引擎将所有 CSS 规则逐一计算并内联为 `style="..."` 行内属性，保证版式 100% 不变形。
+- 🤖 **全主流 Agent 闭环交付**：原生支持 Claude Desktop、Claude Code、Cursor、Codex、WorkBuddy 等主流客户端。Agent 排版后通过 `open_editor` 自动把编辑器交给用户二次微调，确认无误再一键写剪贴板。
+- 🔌 **端口自发现与双模式**：既是标准 Stdio MCP Server，也是支持智能端口顺延的轻量 HTTP 服务，任何语言或脚本皆可调用。
+
+---
+
+## 🔄 工作原理与流转图
+
+```mermaid
+flowchart TD
+    A[Markdown 文本/本地文件] --> B[wechat-md-mcp 核心服务]
+    B --> C[doocs/md 语法与版式解析]
+    C --> D[Juice 样式深度内联]
+    D --> E{使用场景}
+    
+    E -->|可视化编辑| F[Web 可视化编辑器<br/>390px 手机实时预览]
+    F -->|格式调优| G[保存为默认配置<br/>.editor-state.json]
+    G -.->|全局复用| B
+    
+    E -->|MCP Agent 模式| H[Agent 调用 open_editor<br/>弹出/嵌入侧栏供用户微调]
+    H -->|用户确认后| I[copy_to_clipboard<br/>macOS 系统剪贴板]
+    
+    E -->|HTTP API 模式| J[POST /render 或 /load<br/>返回内联 HTML 或编辑器 URL]
+    
+    I --> K[微信公众号后台<br/>Cmd + V 完美粘贴]
+    J --> K
+```
+
+---
+
+## 🚀 快速开始
+
+### 前置要求
+- **Node.js >= 20**
+- 剪贴板直拷工具 `copy_to_clipboard` 目前专为 **macOS** 设计（非 macOS 可通过编辑器下载 HTML、或调用 `save_html` / `preview_html` 获取 HTML 后手动复制）。
+
+### 安装与启动
 
 ```bash
+# 1. 克隆本仓库（仓库自包含内核，无需额外安装 doocs/md）
 git clone https://github.com/rookit-ljt/wechat-md-mcp.git
 cd wechat-md-mcp
-npm install          # 需要 Node >= 20
 
-npm start            # HTTP 服务，默认 127.0.0.1:8788
-npm run mcp          # MCP 服务（stdio）
-npm test             # 冒烟测试
+# 2. 安装依赖
+npm install
+
+# 3. 运行冒烟测试确认环境
+npm test
+
+# 4. 根据需要启动服务
+npm start            # 启动 HTTP 服务与可视化编辑器，默认监听 http://127.0.0.1:8788
+npm run mcp          # 以 stdio 模式运行 MCP 服务
 ```
 
-仓库自包含，不需要另外把 doocs/md 放到别处。
+---
 
-## 它能干什么
+## 🖥 可视化编辑器
 
-- **Markdown → 公众号 HTML**，样式全部内联。微信公众号会剥掉 `<style>` 标签和大部分 class，所以样式内联不是优化项，是必须的一步。
-- 代码块高亮、数学公式、图表、脚注、表格、注音这些能力，都来自 doocs/md，直接可用。
-- 两套入口：**HTTP**（任何语言都能调）和 **MCP**（Agent 直接当工具使）。
-
-## HTTP 服务
+启动服务后，浏览器直接访问：**<http://127.0.0.1:8788/>**
 
 ```bash
-npm start                      # 默认 127.0.0.1:8788
-MD_SERVICE_PORT=9000 npm start # 改端口
+npm start
 ```
 
-| 接口 | 方法 | 说明 |
-| --- | --- | --- |
-| `/health` | GET | 健康检查，返回实际端口 |
-| `/themes` | GET | 内置主题列表 |
-| `/render` | POST | 渲染，参数见下表 |
-| `/load` | POST | 把文章交给编辑器，返回可直接打开的编辑器 URL |
+### 核心功能与亮点
 
-`markdown` 和 `path` 给任意一个即可，后者是本地 `.md` 文件路径。
+- **三栏联动布局**：左栏编写 Markdown 原文，中栏 390px 真实移动端视口实时渲染（250ms 防抖自动刷新），右栏直观调节配色、字号、代码块样式。
+- **本地文件读写与备份**：
+  - 点击「打开 .md」输入绝对路径，或直接将本地 `.md` 文件拖拽进编辑区。
+  - 支持快捷键 `Cmd+S` / `Ctrl+S` 保存；**每次保存前会自动将旧版本备份为 `<file>.bak`**，防手抖更安心。
+- **内联模式开关（排版还原度保证）**：
+  - **预览模式（默认关闭内联）**：保留完整 CSS 规则，排版展示最平滑（避免 Juice 内联造成伪元素丢失）。
+  - **内联模式（勾选开启）**：展示**实际粘贴进微信后的真实渲染效果**。建议粘贴至公众号前勾选核对一次。
+- **本地相对图片智能预览**：
+  - 自动扫描 Markdown 同级或相对目录下的本地图片并转换为 Data URI 显示，避免预览裂图。（*注：微信后台不支持 Data URI，最终发布仍需上传图床外链*）。
+- **「保存为默认」全局沿用**：
+  - 右侧调好满意的品牌色、字号和样式后，点击**「保存为默认」**，配置会自动持久化到仓库目录下的 `.editor-state.json`。
+  - **后续所有 MCP 工具调用与 HTTP 渲染接口，都会默认自动继承该套格式**，无需每次显式传参！
+- **三大一键导出**：
+  1. **复制富文本**：由服务端原生 `osascript` 写入系统剪贴板，最稳、最纯正。
+  2. **保存 HTML**：一键打包下载内联 HTML 文件。
+  3. **浏览器预览**：在系统默认浏览器中全屏查看。
 
-```bash
-curl -X POST http://127.0.0.1:8788/render \
-  -H 'Content-Type: application/json' \
-  -d '{"markdown":"# 标题\n\n正文","theme":"grace","primaryColor":"#07C160"}'
-```
+### Agent 联动与侧边栏嵌入
 
-返回：
+Agent 排版完成后可通过 `open_editor` 工具（或调用 `POST /load`）生成形如 `?path=...&from=agent` 的专用链接：
+- **支持内嵌侧边栏的客户端**（如 WorkBuddy 等）：直接将页面嵌入在对话侧边面板，改完直接在旁边继续对话。
+- **自适应响应式布局**：在宽度小于 1100px 的窄屏或侧边栏环境下，三栏会自动转换为垂直折叠堆叠并支持滚动，绝不挤压变形。
 
-```json
-{ "html": "...", "frontMatter": {}, "readingTime": { "words": 9, "minutes": 0.045 } }
-```
+---
 
-`POST /load` 是给 agent 用的收尾接口：把文章塞进编辑器，拿回一个能直接打开的 URL。传 `path` 就复用磁盘上的文件（用户在编辑器里保存会写回原文件）；传 `markdown` 则先落到 `outputs/<name>.md`，这样编辑器才有东西可存。
+## 🤖 MCP 客户端接入
 
-```bash
-curl -X POST http://127.0.0.1:8788/load \
-  -H 'Content-Type: application/json' \
-  -d '{"path":"/abs/article.md"}'
-```
+所有客户端统一使用仓库内置的启动器 `bin/md-mcp`（已内置环境变量清洗与 Node 多路径探测逻辑）。
 
-```json
-{ "path": "/abs/article.md", "url": "http://127.0.0.1:8788/?path=%2Fabs%2Farticle.md&from=agent", "port": 8788 }
-```
+> [!TIP]
+> 请将下文配置中的 `/path/to/wechat-md-mcp` 替换为你本地实际的 clone 绝对路径。
 
-端口被占用时会往后挪，所以别硬编码 8788——以 `/health` 或 `/load` 返回的 `port` 为准。
+| 客户端 | 配置文件路径 | 配置格式 | 生效步骤 |
+| :--- | :--- | :---: | :--- |
+| **Claude Desktop** | `~/Library/Application Support/Claude/claude_desktop_config.json` | JSON | **必须完全退出并重启 App** |
+| **Claude Code** | `~/.claude.json` 或项目级 `.mcp.json` | JSON | 命令行直接添加，或重启会话 |
+| **Cursor** | `~/.cursor/mcp.json`（全局）或 `.cursor/mcp.json`（项目） | JSON | MCP 设置面板中刷新确认 |
+| **Codex** | `~/.codex/config.toml` | TOML | 新开会话即可 |
+| **WorkBuddy** | `~/.workbuddy/mcp.json` | JSON | 连接器管理页面右上角点击「信任」 |
 
-## MCP 服务
+<details open>
+<summary><b>展开查看各客户端配置代码片段</b></summary>
 
-WorkBuddy、Codex、Cursor、Claude Desktop、Claude Code 都支持，共用同一个入口 `bin/md-mcp`，区别只在配置文件的位置和格式：
-
-| 客户端 | 配置位置 | 格式 |
-| --- | --- | --- |
-| Codex | `~/.codex/config.toml` | TOML |
-| Cursor | `~/.cursor/mcp.json` | JSON |
-| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | JSON |
-| Claude Code | `~/.claude.json`，或项目根目录 `.mcp.json`，或 `claude mcp add` | JSON |
-| WorkBuddy | `~/.workbuddy/mcp.json` | JSON |
-
-JSON 类（WorkBuddy / Claude）的写法：
-
+#### 1. Claude Desktop
+在 `claude_desktop_config.json` 的 `mcpServers` 对象中追加：
 ```json
 {
   "mcpServers": {
     "wechat-md-mcp": {
-      "command": "/path/to/wechat-md-mcp/bin/md-mcp"
+      "command": "/path/to/wechat-md-mcp/bin/md-mcp",
+      "args": []
     }
   }
 }
 ```
 
-Codex 的写法：
+#### 2. Claude Code
+命令行一键注册：
+```bash
+claude mcp add wechat-md-mcp -- /path/to/wechat-md-mcp/bin/md-mcp
+```
+或在项目根目录创建 `.mcp.json`：
+```json
+{
+  "mcpServers": {
+    "wechat-md-mcp": {
+      "command": "/path/to/wechat-md-mcp/bin/md-mcp",
+      "args": []
+    }
+  }
+}
+```
 
+#### 3. Cursor
+编辑 `~/.cursor/mcp.json`：
+```json
+{
+  "mcpServers": {
+    "wechat-md-mcp": {
+      "command": "/path/to/wechat-md-mcp/bin/md-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+#### 4. Codex
+编辑 `~/.codex/config.toml` 追加：
 ```toml
 [mcp_servers.wechat-md-mcp]
 command = "/path/to/wechat-md-mcp/bin/md-mcp"
 args = []
 ```
 
-完整的分客户端配置、免 shell 启动器的替代写法、以及排错，见 [docs/客户端接入.md](docs/客户端接入.md)。
+#### 5. WorkBuddy
+编辑 `~/.workbuddy/mcp.json`：
+```json
+{
+  "mcpServers": {
+    "wechat-md-mcp": {
+      "command": "/path/to/wechat-md-mcp/bin/md-mcp",
+      "args": []
+    }
+  }
+}
+```
+*注：配置后请在「连接器管理」右上角对该服务勾选「信任」。*
 
-两点容易漏的：WorkBuddy 要去「连接器管理」页面右上角对新服务点「信任」；Claude Desktop **必须完全退出再重开**才会加载新配置。
+</details>
 
-提供的 5 个工具：
+> 更多分客户端细节与免 shell 启动器直接调 node 方案，请参见 [docs/客户端接入.md](docs/客户端接入.md)。
 
-| 工具 | 作用 |
-| --- | --- |
-| `render_markdown` | 渲染 Markdown（或本地 `.md` 路径）为公众号 HTML |
-| `list_themes` | 列出内置主题 |
-| `save_html` | 把 HTML 落盘 |
-| `preview_html` | 存到临时文件并用浏览器打开 |
-| `copy_to_clipboard` | 写入 macOS 剪贴板，回公众号后台 Cmd+V |
-| `open_editor` | 拉起可视化编辑器并用浏览器打开，传 `path` 直接打开某篇 `.md` |
+### 提供的 6 个 MCP 工具
 
-典型流程：`render_markdown` → `copy_to_clipboard` → 公众号后台 Cmd+V。
+| 工具名 | 功能说明 |
+| :--- | :--- |
+| `render_markdown` | 将 Markdown（文本或本地 `.md` 文件）渲染为完全内联的公众号 HTML |
+| `open_editor` | **拉起可视化编辑器并打开指定文章**（支持传 `path`，支持 `open: false` 仅获取 URL） |
+| `copy_to_clipboard` | 将渲染好的 HTML 写入 macOS 富文本剪贴板，支持直接在公众号后台粘贴 |
+| `list_themes` | 列出内置可用的主题样式（`default` 经典 / `grace` 优雅 / `simple` 简洁） |
+| `save_html` | 将 HTML 落盘保存至本地指定路径 |
+| `preview_html` | 写入临时文件并自动唤起默认浏览器进行实时排版预览 |
 
-### 顺手装一下 Skill
+---
 
-MCP 只给 agent 工具，不告诉它什么时候用、按什么顺序用。`skills/wechat-md/SKILL.md` 补这一层，格式是几家 agent 通用的：
+## 🧩 配置 Agent Skill（推荐）
+
+MCP 工具负责“能力提供”，而 `skills/wechat-md/SKILL.md` 则负责教导 Agent **“最佳实践流程与业务规范”**：
 
 ```bash
-npm run install:skill        # 软链到 Claude / Codex / Cursor / WorkBuddy 的 skills 目录
-npm run uninstall:skill      # 移除
+npm run install:skill        # 自动软链到 Claude / Codex / Cursor / WorkBuddy 的 skills 目录
+npm run uninstall:skill      # 卸载移除软链
 ```
 
-没装的 agent 会自动跳过。已存在时默认不覆盖，要重建加 `--force`：
+- 若已存在旧软链想强制覆盖，可执行：`sh scripts/install-skill.sh --force`
+- **使用软链的好处**：未来仓库更新或自行修改 `SKILL.md`，所有 Agent 客户端自动同步生效。
+
+---
+
+## 💬 在 Agent 中使用
+
+装好 MCP 与 Skill 后，无需记工具名，直接用人话交互：
+
+### 常用对话示例
+
+- **全流程排版（默认交付至编辑器）：**
+  > “把 `~/Documents/article.md` 排版成公众号格式。”
+- **跳过审核直接复制：**
+  > “把这篇文章排版成公众号格式，渲染完直接复制到剪贴板，不用打开编辑器。”
+- **指定排版风格：**
+  > “用 `grace` 主题，主色调调成 `#07C160`，代码块带 macOS 视窗按钮排版这篇文章。”
+
+### Agent 内部标准作业流（SOP）
+
+1. **智能接收**：优先传入本地文件路径 `path` 读取（防止超长文本撞碎参数上限 `ARG_MAX`）。
+2. **样式渲染**：读取 `.editor-state.json` 默认配置并结合用户需求进行渲染。
+3. **安全落盘**：调用 `save_html` 保存一份到本地，避免超大 HTML 堆积在上下文。
+4. **交出编辑器让用户过目**：调用 `open_editor` 弹出或在侧栏嵌入编辑器。用户可以在 390px 视图里最终核对，做少许字句微调。
+5. **用户确认后写入剪贴板**：用户在编辑器点保存并在对话中确认后，Agent 触发 `copy_to_clipboard`，提示用户去微信后台 `Cmd+V`。
+6. **图片外链安全扫描**：自动检查文章内的 `<img>` 标签，若发现本地文件或 `data:` URI，主动提醒用户替换为 HTTPS 图床外链。
+
+---
+
+## 🌐 HTTP 服务接口
+
+适合在无 MCP 客户端、自动化脚本或 CI/CD 流程中使用。
 
 ```bash
-sh scripts/install-skill.sh --force
+npm start                      # 默认监听 127.0.0.1:8788（端口被占时自动顺延）
+MD_SERVICE_PORT=9000 npm start # 自定义端口
 ```
 
-装完之后直接说「把这篇排版成公众号格式」就行，它会自己去读品牌配置、渲染、复制，不用你复述流程。只装 Skill 也能用——里面写了 HTTP 兜底路径。
+### 接口列表
 
-用软链而不是复制，是为了改仓库里那一份 SKILL.md 就四家同时生效。
+| 路径 | 方法 | 说明 |
+| :--- | :---: | :--- |
+| `/health` | `GET` | 检查健康状态，返回当前服务实际占用的端口号 `port` |
+| `/themes` | `GET` | 获取可用内置主题列表 |
+| `/render` | `POST` | 核心渲染接口，支持传入 Markdown 文本或本地路径 |
+| `/load` | `POST` | **向编辑器注入文章**，返回包含直达参数的编辑器 URL |
+| `/state` | `GET` / `POST`| 获取或更新 `.editor-state.json` 全局默认排版配置 |
+| `/open` / `/save` | `POST`| 编辑器专用的本地文件加载与覆写保存接口（自动 `.bak`） |
+| `/copy` | `POST` | 服务端剪贴板写入代理接口 |
 
-## 在 Agent 里怎么用
+### 核心接口调用示例
 
-MCP 和 Skill 都装好之后，不用记工具名，说人话就行：
-
-```
-把 ~/文章/xxx.md 排版成公众号格式，复制到剪贴板
-```
-
-四家都认。Agent 会按 SKILL.md 里的流程自己走完，不需要你复述步骤：
-
-1. 渲染（优先传文件路径，长文本走参数容易撞 ARG_MAX）
-2. `save_html` 落盘一份，不把大段 HTML 糊在对话里
-3. **把编辑器交给用户**：`open_editor` 打开带这篇文章的编辑器。有侧边预览面板的客户端（比如 WorkBuddy）会把页面嵌在对话右侧，你就在对话里看着改
-4. 你在编辑器里改完点「保存」，回对话说一声，它才 `copy_to_clipboard`，然后告诉你可以去公众号后台 Cmd+V
-5. 扫一遍 `<img src>`，发现本地路径会提醒你先传图床
-
-第 3 步不是可选项——排版完不给看，等于没交付。想跳过就直接说「渲染完直接复制」。
-
-想精确控制就直接点名：
-
-```
-用 grace 主题渲染这篇，主色 #07C160，代码块加 macOS 标题栏
-有哪些主题？
-只渲染，别复制
+#### 1. 渲染文章 (`POST /render`)
+```bash
+curl -X POST http://127.0.0.1:8788/render \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "markdown": "# 标题\n\n正文内容，支持**加粗**与[超链接](https://example.com)。",
+    "theme": "grace",
+    "primaryColor": "#07C160"
+  }'
 ```
 
-### 各家的生效条件
+#### 2. 将文章注入可视化编辑器 (`POST /load`)
+```bash
+curl -X POST http://127.0.0.1:8788/load \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/abs/path/to/article.md"}'
+```
+**返回：**
+```json
+{
+  "path": "/abs/path/to/article.md",
+  "url": "http://127.0.0.1:8788/?path=%2Fabs%2Fpath%2Fto%2Farticle.md&from=agent",
+  "port": 8788
+}
+```
 
-| 客户端 | 装完要做什么 |
-| --- | --- |
-| **WorkBuddy** | 去「连接器管理」页面右上角对新服务点「信任」 |
-| **Claude Desktop** | **完全退出再重开**，只关窗口不算 |
-| **Claude Code** | 重开会话，`/mcp` 可查看当前连接状态 |
-| **Codex** | 开新会话。GUI 客户端不继承 shell PATH，启动器会自动兜底找 Node |
-| **Cursor** | 在 MCP 设置里确认服务已启用 |
+---
 
-### 只装 Skill、没装 MCP
+## ⚙️ 排版与渲染参数
 
-也跑得通，代价是拿不到剪贴板。SKILL.md 里写了 HTTP 兜底：起服务 → 渲染 → 落盘 → 浏览器打开，最后一步 Cmd+A、Cmd+C 由你手动复制。
+`render_markdown` 工具与 `POST /render` 接口接受完全统一的参数：
 
-### 两个都没装
+| 参数 | 类型 | 默认值 | 详细说明 |
+| :--- | :---: | :---: | :--- |
+| `markdown` | string | — | Markdown 文本源码（与 `path` 二选一） |
+| `path` | string | — | 本地 `.md` 文件的绝对或相对路径（与 `markdown` 二选一） |
+| `theme` | string | `'default'` | 内置主题：`default`（经典蓝） / `grace`（优雅绿） / `simple`（极简紫） |
+| `primaryColor` | string | `'#0F4C81'` | 全文强调色（十六进制 HEX，影响标题下划线、加粗、代码色等） |
+| `fontSize` | string | `'16px'` | 全文字号基准 |
+| `lineHeight` | string | `'1.75'` | 正文行高比例 |
+| `fontFamily` | string | 系统字体栈 | 默认优先苹方、冬青黑体及微软雅黑 |
+| `isMacCodeBlock` | boolean | `false` | 代码块顶部是否添加 macOS 红黄绿三色控制按钮 |
+| `isShowLineNumber`| boolean | `false` | 代码块是否显示行号 |
+| `codeBlockTheme` | string | highlight.js `github` | highlight.js 代码高亮样式 CSS 地址 |
+| `citeStatus` | boolean | `false` | 是否自动将文中超链接转换为微信风格的文末脚注引用 |
+| `countStatus` | boolean | `false` | 文首是否追加字数及预计阅读时间 |
+| `isUseIndent` | boolean | `false` | 段落首行是否缩进 2 字符 |
+| `isUseJustify` | boolean | `false` | 正文段落是否两端对齐 |
+| `customCSS` | string | — | 追加在末尾的自定义 CSS 代码（优先级最高） |
+| `inline` | boolean | `true` | 是否将所有 CSS 规则计算内联（**粘贴到微信后台严禁设为 false**） |
 
-直接调 HTTP 接口就行，见上面「HTTP 服务」一节。任何语言、任何脚本都能调，不依赖 agent。
+---
 
-更多分客户端的细节见 [docs/客户端接入.md](docs/客户端接入.md)。
+## ⚠️ 关键避坑指南与排错
 
-## 可视化编辑器
+> [!IMPORTANT]
+> **1. 图片必须使用 HTTPS 外链**
+> 微信公众号编辑器会严格拦截本地相对路径（如 `./pic.png`）和 base64 `data:` URI。排版发布前请先将本地图片上传至公开图床。
 
-起服务后浏览器打开 <http://127.0.0.1:8788/>：
+> [!IMPORTANT]
+> **2. 粘贴进微信后台前不要关闭 `inline`**
+> 微信编辑器会自动剔除 HTML 文档中的 `<style>` 标签以及非内联 class 名。若关闭内联，粘贴至公众号后台将变成毫无样式的纯文本。
+
+> [!CAUTION]
+> **3. 本地文件安全防护（仅监听 127.0.0.1）**
+> 可视化编辑器的 `/open` 和 `/save` 接口具备读取和覆写本机文件的权限（这是本地编辑器正常运作的前提）。服务设计上**严格仅监听 `127.0.0.1` 本地回环接口**，**严禁**将服务反代暴露至局域网或公网，也**严禁**监听 `0.0.0.0`。
+
+> [!WARNING]
+> **4. `copy_to_clipboard` 剪贴板工具仅支持 macOS**
+> 剪贴板富文本注入依赖 macOS 系统级 `osascript` 写入 `public.html` 数据段。在 Linux 或 Windows 系统上该工具会报错，非 macOS 用户请在编辑器中点击下载 HTML 或使用 `save_html`。
+
+> [!NOTE]
+> **5. GUI 客户端找不到 Node 环境（`no Node >= 20 found`）**
+> macOS 下的 GUI 应用（如 Claude Desktop、Codex）不会主动继承用户的 Shell PATH，容易导致找不到 node。
+> - 启动器已内置 Homebrew、nvm、fnm、volta 等常见路径探测。
+> - 若仍提示找不到，可在客户端 MCP 配置的 `env` 字段显式声明：`"env": { "MD_SERVICE_NODE": "/你的/node/绝对路径" }`。
+
+> [!NOTE]
+> **6. WorkBuddy 沙箱运行报 ESM loader 错误**
+> 某些宿主环境可能向进程注入 `NODE_OPTIONS` 钩子破坏 tsx 的 ESM 加载。`bin/md-mcp` 启动器已内置清洗逻辑；若在终端中独立测试执行，可在命令前加上：
+> ```bash
+> env -u NODE_OPTIONS npx tsx test/smoke.ts
+> ```
+
+---
+
+## 📂 项目结构
+
+```
+wechat-md-mcp/
+├── bin/
+│   └── md-mcp            # MCP 专用 Shell 启动器（自动探测环境与清理脏变量）
+├── web/                  # 可视化编辑器（原生 HTML/CSS/JS，无需编译构建）
+│   ├── index.html        # 三栏编辑界面骨架
+│   ├── app.js            # 实时渲染、防抖、文件读写与状态管理
+│   └── style.css         # 响应式布局样式（支持侧边栏窄屏适配）
+├── docs/                 # 客户端接入指南、选型记录与设计文档
+├── run-mcp.mjs           # MCP 服务入口
+├── run-server.mjs        # HTTP 服务入口
+├── polyfill.mjs          # Node.js 环境下模拟浏览器 DOM 的必要 Polyfill
+├── src/
+│   ├── clipboard.ts      # macOS 系统富文本剪贴板注入实现
+│   ├── cssNormalize.ts   # 微信专用 CSS 归一化与变量预处理
+│   ├── images.ts         # 本地图片相对路径扫描与预览转码
+│   ├── mcp.ts            # MCP Server 与 6 大工具注册声明
+│   ├── render.ts         # doocs/md 核心渲染管道与 Juice 内联调度
+│   ├── server.ts         # HTTP 路由、静态文件托管与智能端口探测
+│   └── state.ts          # .editor-state.json 格式配置状态持久化
+├── skills/
+│   └── wechat-md/        # 通用 Agent Skill（定义排版操作 SOP 与规则）
+├── scripts/
+│   └── install-skill.sh  # Skill 多客户端一键软链/卸载脚本
+├── test/                 # 冒烟测试、代码块测试与排版预览构建脚本
+└── vendor/
+    └── doocs-md/         # 本地裁剪版 doocs/md 官方渲染引擎
+```
+
+---
+
+## 🛠 常用调试命令
 
 ```bash
-npm start
+npm test                                          # 运行冒烟与代码块渲染测试
+npx tsx test/clipboard.ts                         # 测试剪贴板富文本写入（注意：会覆盖当前剪贴板）
+npx tsx test/build-preview.ts input.md out.html grace # 生成手机宽度(375px)本地预览 HTML
 ```
 
-三栏：左边写 Markdown，中间 390px 手机宽度实时预览，右边调格式。改动 250ms 防抖后自动重渲染。
+---
 
-- **打开 / 保存**：点「打开 .md」填绝对路径，或把文件拖进编辑区（拖拽只能拿到内容，没有路径，保存时会再问一次）。`Cmd/Cmd+S` 保存，每次保存前会把原文件备份成 `.bak`。
-- **内联模式开关**：预览默认**不内联**（保留 `<style>`），因为 juice 内联会丢掉伪元素和媒体查询，看版式反而失真。勾上「内联模式」才是真正粘进微信后的样子——粘之前建议切过去确认一次。
-- **本地图片**：预览会把 `.md` 所在目录下的本地图转成 data URI 显示出来，否则全是裂图。**这只对预览有效**，微信不吃 data URI，发布前还是要传图床。
-- **三个导出按钮**：复制富文本（服务端 osascript 写剪贴板，最可靠）、保存 HTML（浏览器下载）、浏览器预览（系统默认浏览器打开）。
+## 📄 致谢与开源许可
 
-右边调完格式点**「保存为默认」**，配置落到服务目录的 `.editor-state.json`。之后 HTTP 接口和 MCP 工具渲染任何文章都会**默认沿用这份配置**，不用每次传参；显式传的参数仍然优先。
-
-### 由 agent 打开
-
-排版完成后 `open_editor`（或 `POST /load`）会返回一个带 `?path=...&from=agent` 的 URL。页面认这个参数：直接载入那篇文章，顶部显示一条提示条告诉你改完点保存、再回对话说一声。
-
-- **有侧边预览面板的客户端**（WorkBuddy 等）：把 URL 交给内嵌面板，页面开在对话右侧，不用来回切窗口
-- **其他客户端**：`open_editor` 默认用系统浏览器打开；传 `open: false` 可以只拿 URL、自己决定怎么展示
-
-窄面板（< 1100px）下三栏会自动改成纵向堆叠并允许滚动，嵌在侧边栏里也不会挤成一团。
-
-不引前端构建工具：页面是原生 HTML/CSS/JS 三个文件，由同一个 Node 进程托管，不加依赖、不需要 build。
-
-## 渲染参数
-
-`render_markdown` 与 `POST /render` 接受同一套参数：
-
-| 参数 | 默认 | 说明 |
-| --- | --- | --- |
-| `markdown` / `path` | 二选一 | Markdown 原文，或本地 `.md` 文件路径 |
-| `theme` | `default` | `default` 经典 / `grace` 优雅 / `simple` 简洁 |
-| `primaryColor` | `#0F4C81` | 主色，标题、强调、链接都跟它走 |
-| `fontFamily` | 系统字体栈 | 默认 PingFang / 微软雅黑 |
-| `fontSize` | `16px` | 正文字号 |
-| `lineHeight` | `1.75` | 行高 |
-| `isMacCodeBlock` | `false` | 代码块 macOS 红黄绿标题栏 |
-| `isShowLineNumber` | `false` | 代码块行号 |
-| `citeStatus` | `false` | 链接转脚注引用样式 |
-| `countStatus` | `false` | 文首显示字数/阅读时长 |
-| `isUseIndent` | `false` | 段首缩进两字符 |
-| `isUseJustify` | `false` | 两端对齐 |
-| `codeBlockTheme` | highlight.js `github` | hljs 主题 CSS URL |
-| `customCSS` | — | 追加自定义 CSS，优先级最高 |
-| `inline` | `true` | 是否内联全部样式（**粘进公众号时不要关**） |
-
-## 注意事项
-
-**图片必须用 https。** 微信只接受 https 图片，Markdown 里的本地路径粘过去不会显示，需要先传图床。
-
-**粘进公众号前别关 `inline`。** 关掉的话输出是 `<style>` + class 的形式，微信会把它们剥掉，正文只剩纯文本。
-
-**手动跑命令可能需要 `env -u NODE_OPTIONS`。** 部分宿主（如 WorkBuddy）会往 `NODE_OPTIONS` 注入钩子，破坏 tsx 的 ESM loader，表现为启动即崩。`bin/md-mcp` 启动器内部已经处理了，但直接用 `npx tsx` 跑别的命令时要自己加：
-
-```bash
-env -u NODE_OPTIONS npx tsx test/smoke.ts
-```
-
-**Node 版本要 ≥ 20。** 启动器依次尝试 `$MD_SERVICE_NODE`、PATH、以及几个常见绝对路径。Claude Desktop 和 Codex 这类 GUI 客户端不会继承你 shell 的 PATH，所以这一步做了兜底探测；真找不到时会明确报错提示设 `MD_SERVICE_NODE`。
-
-**`copy_to_clipboard` 只支持 macOS。** 它走 `osascript` 写 `public.html` flavor；其他系统没有 `osascript`，这个工具会直接报错。非 macOS 请用 `save_html` 或 `preview_html` 拿到 HTML 再手动处理。
-
-**主题只有 3 套。** doocs/md 的 shared config 里就这 3 个 CSS。想要别的版式用 `customCSS` 叠加。
-
-**没有草稿箱发布。** 个人订阅号的接口权限通常拿不到，实测剪贴板粘贴更稳。
-
-**编辑器的 `/open` `/save` 能读写本机任意路径。** 这是它存在的前提（否则浏览器打不开本地 `.md`），代价是本机任何进程都能通过这两个接口读写文件。服务只监听 `127.0.0.1`，**不要**把它转发到局域网或公网，也不要改成监听 `0.0.0.0`。保存时会先备份 `.bak`，但仍是一次覆盖写。
-
-**改 `vendor/` 下的代码时注意 import 写法。** 为了精简，vendored 副本删掉了部分文件和入口，裸 `import '@md/shared'` 会失败，请用 `@md/shared/configs`、`@md/shared/types`、`@md/shared/utils` 这类子路径——上游 core 本来就是这么写的。上游版本与更新方式见 [vendor/doocs-md/UPSTREAM.md](vendor/doocs-md/UPSTREAM.md)。
-
-## 项目结构
-
-```
-├── vendor/doocs-md/   # 裁剪后的 doocs/md 渲染内核
-├── bin/md-mcp         # MCP 启动器
-├── run-mcp.mjs        # MCP 入口
-├── run-server.mjs     # HTTP 入口
-├── polyfill.mjs       # core 会碰到的浏览器 API 补丁
-├── src/               # 渲染管线、HTTP 接口、MCP 工具定义
-├── web/               # 可视化编辑器（原生三文件，无构建步骤）
-├── skills/wechat-md/  # SKILL.md，告诉各 agent 怎么用这套工具
-├── scripts/           # skill 的安装/卸载脚本
-├── docs/              # 各 MCP 客户端的接入配置
-└── test/              # 冒烟测试与预览生成
-```
-
-## 常见用法
-
-```bash
-npm test                                          # 渲染冒烟 + 代码块/表格
-npx tsx test/clipboard.ts                         # 验证剪贴板写入（会覆盖剪贴板）
-npx tsx test/build-preview.ts <md> <out> <theme>  # 生成 375px 手机宽度预览页
-```
-
-## 许可
-
-本项目 MIT。
-
-`vendor/doocs-md/` 下是 [doocs/md](https://github.com/doocs/md) 的代码（MIT，Copyright (c) Doocs），按原 license 重新分发。
+- 本项目基于 [MIT License](LICENSE) 开源。
+- 核心渲染能力依托于强大的开源项目 [doocs/md](https://github.com/doocs/md)（Copyright (c) Doocs），特别致谢 doocs 团队的杰出贡献。
