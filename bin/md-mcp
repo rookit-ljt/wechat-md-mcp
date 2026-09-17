@@ -1,0 +1,35 @@
+#!/bin/zsh
+# MCP launcher (stdio transport).
+#
+# Why this wrapper exists rather than calling tsx directly:
+#
+#   1. NODE_OPTIONS is cleared before launch. Hosts such as WorkBuddy inject a
+#      brokered-FS hook there, and that hook breaks the ESM loader tsx depends
+#      on. A one-off `env -u NODE_OPTIONS` cannot reliably cover a subprocess
+#      that gets spawned later, so it is stripped here.
+#   2. It picks the Node binary. Node >= 20 is required. Set MD_SERVICE_NODE to
+#      pin one explicitly; otherwise fall back to whatever node is on PATH.
+
+unset NODE_OPTIONS
+export CODEBUDDY_BROKERED_FS_HOOK_ENABLED=0
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+
+if [ -n "$MD_SERVICE_NODE" ]; then
+  NODE_BIN="$MD_SERVICE_NODE"
+else
+  NODE_BIN=$(command -v node)
+fi
+
+if [ -z "$NODE_BIN" ]; then
+  printf '[md-mcp] node not found on PATH; set MD_SERVICE_NODE to a Node >= 20 executable\n' >&2
+  exit 1
+fi
+
+TSX="$ROOT/node_modules/tsx/dist/cli.mjs"
+if [ ! -f "$TSX" ]; then
+  printf '[md-mcp] tsx missing at %s — run "npm install" in %s first\n' "$TSX" "$ROOT" >&2
+  exit 1
+fi
+
+exec "$NODE_BIN" "$TSX" "$ROOT/run-mcp.mjs"

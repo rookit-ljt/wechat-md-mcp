@@ -1,0 +1,19 @@
+node_modules/
+dist/
+build/
+
+# Generated previews from test/build-preview.ts
+outputs/
+
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+
+.env
+.env.local
+.env.*.local
+
+.idea/
+.vscode/*
+!.vscode/extensions.json
