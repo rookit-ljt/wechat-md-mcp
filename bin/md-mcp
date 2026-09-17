@@ -1,34 +1,75 @@
 #!/bin/zsh
 # MCP launcher (stdio transport).
 #
-# Why this wrapper exists rather than calling tsx directly:
+# WorkBuddy, Codex, Claude Desktop and Claude Code all register this same entry
+# point. Two things make it a wrapper rather than a direct tsx invocation:
 #
-#   1. NODE_OPTIONS is cleared before launch. Hosts such as WorkBuddy inject a
-#      brokered-FS hook there, and that hook breaks the ESM loader tsx depends
-#      on. A one-off `env -u NODE_OPTIONS` cannot reliably cover a subprocess
-#      that gets spawned later, so it is stripped here.
-#   2. It picks the Node binary. Node >= 20 is required. Set MD_SERVICE_NODE to
-#      pin one explicitly; otherwise fall back to whatever node is on PATH.
+#   1. NODE_OPTIONS is cleared before launch. Some hosts inject helper flags
+#      there (WorkBuddy installs a brokered-FS hook) which break tsx's ESM
+#      loader, and the result is a startup crash with nothing useful in the log.
+#      Clearing it here also covers any subprocess spawned downstream, which a
+#      one-off `env -u` on the caller side would not.
+#   2. It locates a usable Node. GUI hosts such as Claude Desktop and Codex do
+#      not inherit your shell PATH, so `command -v node` often comes back empty
+#      there; known absolute locations are probed as a fallback.
+
+setopt NULL_GLOB   # a glob with no match expands to nothing instead of erroring
 
 unset NODE_OPTIONS
 export CODEBUDDY_BROKERED_FS_HOOK_ENABLED=0
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+REQUIRED_MAJOR=20
+NODE_BIN=""
 
-if [ -n "$MD_SERVICE_NODE" ]; then
-  NODE_BIN="$MD_SERVICE_NODE"
-else
-  NODE_BIN=$(command -v node)
+# Accepts a path, returns 0 and sets NODE_BIN only if it runs and is new enough.
+probe_node() {
+  local candidate="$1"
+  [ -n "$candidate" ] || return 1
+  [ -x "$candidate" ] || return 1
+
+  local version major
+  version=$("$candidate" -v 2>/dev/null) || return 1
+  version=${version#v}
+  major=${version%%.*}
+  [[ "$major" =~ '^[0-9]+$' ]] || return 1
+  (( major >= REQUIRED_MAJOR )) || return 1
+
+  NODE_BIN="$candidate"
+  return 0
+}
+
+# 1. Explicit override wins.
+probe_node "$MD_SERVICE_NODE"
+
+# 2. Whatever is on PATH.
+[ -z "$NODE_BIN" ] && probe_node "$(command -v node 2>/dev/null)"
+
+# 3. Known absolute locations — the step that matters for GUI hosts whose PATH
+#    bottoms out at /usr/bin:/bin. Ordered roughly by how likely they are to be
+#    current: Homebrew (Apple Silicon), Node installer + Homebrew (Intel), nvm,
+#    fnm, volta.
+if [ -z "$NODE_BIN" ]; then
+  for candidate in \
+    /opt/homebrew/bin/node \
+    /usr/local/bin/node \
+    "$HOME"/.nvm/versions/node/*/bin/node \
+    "$HOME"/.local/share/fnm/node-versions/*/installation/bin/node \
+    "$HOME"/.volta/bin/node
+  do
+    probe_node "$candidate" && break
+  done
 fi
 
 if [ -z "$NODE_BIN" ]; then
-  printf '[md-mcp] node not found on PATH; set MD_SERVICE_NODE to a Node >= 20 executable\n' >&2
+  printf '[wechat-md-mcp] no Node >= %s found\n' "$REQUIRED_MAJOR" >&2
+  printf '[wechat-md-mcp] set MD_SERVICE_NODE to a Node >= %s executable\n' "$REQUIRED_MAJOR" >&2
   exit 1
 fi
 
 TSX="$ROOT/node_modules/tsx/dist/cli.mjs"
 if [ ! -f "$TSX" ]; then
-  printf '[md-mcp] tsx missing at %s — run "npm install" in %s first\n' "$TSX" "$ROOT" >&2
+  printf '[wechat-md-mcp] dependencies missing — run "npm install" in %s\n' "$ROOT" >&2
   exit 1
 fi
 

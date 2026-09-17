@@ -53,7 +53,16 @@ curl -X POST http://127.0.0.1:8788/render \
 
 ## MCP 服务
 
-在 MCP 宿主的配置文件里注册（路径换成你 clone 的位置）：
+WorkBuddy、Codex、Claude Desktop、Claude Code 都支持，共用同一个入口 `bin/md-mcp`，区别只在配置文件的位置和格式：
+
+| 客户端 | 配置位置 | 格式 |
+| --- | --- | --- |
+| Codex | `~/.codex/config.toml` | TOML |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | JSON |
+| Claude Code | 项目根目录 `.mcp.json`，或 `claude mcp add` | JSON |
+| WorkBuddy | `~/.workbuddy/mcp.json` | JSON |
+
+JSON 类（WorkBuddy / Claude）的写法：
 
 ```json
 {
@@ -65,7 +74,17 @@ curl -X POST http://127.0.0.1:8788/render \
 }
 ```
 
-WorkBuddy 用户还需要去「连接器管理」页面右上角的自定义连接器入口，对新服务点「信任」才会生效。
+Codex 的写法：
+
+```toml
+[mcp_servers.wechat-md-mcp]
+command = "/path/to/wechat-md-mcp/bin/md-mcp"
+args = []
+```
+
+完整的分客户端配置、免 shell 启动器的替代写法、以及排错，见 [docs/客户端接入.md](docs/客户端接入.md)。
+
+两点容易漏的：WorkBuddy 要去「连接器管理」页面右上角对新服务点「信任」；Claude Desktop **必须完全退出再重开**才会加载新配置。
 
 提供的 5 个工具：
 
@@ -113,7 +132,7 @@ WorkBuddy 用户还需要去「连接器管理」页面右上角的自定义连�
 env -u NODE_OPTIONS npx tsx test/smoke.ts
 ```
 
-**Node 版本要 ≥ 20。** 启动器默认用 PATH 上的 node，想精确指定就设环境变量 `MD_SERVICE_NODE`。
+**Node 版本要 ≥ 20。** 启动器依次尝试 `$MD_SERVICE_NODE`、PATH、以及几个常见绝对路径。Claude Desktop 和 Codex 这类 GUI 客户端不会继承你 shell 的 PATH，所以这一步做了兜底探测；真找不到时会明确报错提示设 `MD_SERVICE_NODE`。
 
 **`copy_to_clipboard` 只支持 macOS。** 它走 `osascript` 写 `public.html` flavor；其他系统没有 `osascript`，这个工具会直接报错。非 macOS 请用 `save_html` 或 `preview_html` 拿到 HTML 再手动处理。
 
@@ -132,6 +151,7 @@ env -u NODE_OPTIONS npx tsx test/smoke.ts
 ├── run-server.mjs     # HTTP 入口
 ├── polyfill.mjs       # core 会碰到的浏览器 API 补丁
 ├── src/               # 渲染管线、HTTP 接口、MCP 工具定义
+├── docs/              # 各 MCP 客户端的接入配置
 └── test/              # 冒烟测试与预览生成
 ```
 
