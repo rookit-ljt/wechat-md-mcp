@@ -4,47 +4,25 @@
 
 渲染用的是 doocs/md 官方内核（`packages/core`），不是重写。
 
+## 快速开始
+
 ```bash
-npm install
-npm start        # HTTP 服务，默认 127.0.0.1:8788
-npm run mcp      # MCP 服务（stdio）
-npm test
+git clone https://github.com/rookit-ljt/wechat-md-mcp.git
+cd wechat-md-mcp
+npm install          # 需要 Node >= 20
+
+npm start            # HTTP 服务，默认 127.0.0.1:8788
+npm run mcp          # MCP 服务（stdio）
+npm test             # 冒烟测试
 ```
+
+仓库自包含，不需要另外把 doocs/md 放到别处。
 
 ## 它能干什么
 
 - **Markdown → 公众号 HTML**，样式全部内联。微信公众号会剥掉 `<style>` 标签和大部分 class，所以样式内联不是优化项，是必须的一步。
-- 代码块高亮、数学公式、图表、脚注、表格、注音这些能力，都是 doocs/md 本来就有的。
-- 两套入口：**HTTP**（任何语言都能调）和 **MCP**（Agent 直接把它当工具使）。
-
-## 为什么不用官方的 `@md/mcp-server`
-
-doocs/md 官方确实写了 `packages/mcp-server`，但它：
-
-- **没有发布到 npm**，必须拉整个 monorepo 跑源码
-- 依赖 pnpm 装几十个 workspace 包，装完好几个 G
-- 它的 `apps/api` 是 Cloudflare Workers 的云同步服务，跟本地渲染没关系
-
-这个项目只取 `packages/core` 和 `packages/shared` 两个包，裁剪后 vendor 进仓库（约 500KB），npm 依赖从几十个 workspace 包缩到 11 个。
-
-## 目录结构
-
-```
-wechat-md-mcp/
-├── vendor/doocs-md/        # 裁剪后的 doocs/md 渲染内核，见 UPSTREAM.md
-├── bin/md-mcp              # MCP 启动器
-├── run-mcp.mjs             # MCP 入口
-├── run-server.mjs          # HTTP 入口
-├── polyfill.mjs            # core 会碰到的浏览器 API 补丁
-├── src/
-│   ├── render.ts           # 渲染管线
-│   ├── cssNormalize.ts     # shadcn 变量注入 + 颜色归一化
-│   ├── clipboard.ts        # macOS 富文本剪贴板
-│   ├── server.ts           # HTTP 接口
-│   └── mcp.ts              # MCP 工具定义
-├── test/                   # 冒烟测试与预览生成
-└── docs/选型记录.md         # 为什么最终选了 doocs/md
-```
+- 代码块高亮、数学公式、图表、脚注、表格、注音这些能力，都来自 doocs/md，直接可用。
+- 两套入口：**HTTP**（任何语言都能调）和 **MCP**（Agent 直接当工具使）。
 
 ## HTTP 服务
 
@@ -59,15 +37,23 @@ MD_SERVICE_PORT=9000 npm start # 改端口
 | `/themes` | GET | 内置主题列表 |
 | `/render` | POST | 渲染，参数见下表 |
 
+`markdown` 和 `path` 给任意一个即可，后者是本地 `.md` 文件路径。
+
 ```bash
 curl -X POST http://127.0.0.1:8788/render \
   -H 'Content-Type: application/json' \
   -d '{"markdown":"# 标题\n\n正文","theme":"grace","primaryColor":"#07C160"}'
 ```
 
+返回：
+
+```json
+{ "html": "...", "frontMatter": {}, "readingTime": { "words": 9, "minutes": 0.045 } }
+```
+
 ## MCP 服务
 
-在 MCP 宿主里这样注册（路径换成你 clone 的位置）：
+在 MCP 宿主的配置文件里注册（路径换成你 clone 的位置）：
 
 ```json
 {
@@ -91,12 +77,7 @@ WorkBuddy 用户还需要去「连接器管理」页面右上角的自定义连�
 | `preview_html` | 存到临时文件并用浏览器打开 |
 | `copy_to_clipboard` | 写入 macOS 剪贴板，回公众号后台 Cmd+V |
 
-### 关于 `bin/md-mcp`
-
-启动器专门做了两件事：
-
-1. **`unset NODE_OPTIONS`**。WorkBuddy 会往里面注入一个 brokered-FS 钩子，这个钩子会破坏 tsx 依赖的 ESM loader，导致启动即崩。清除动作放在启动器内部而不是命令行上，是因为后续可能二次 spawn 子进程，光靠 `env -u` 罩不住。
-2. **挑选 Node 二进制**。要求 Node ≥ 20。想精确指定就设环境变量 `MD_SERVICE_NODE`，否则用 PATH 上的 node。
+典型流程：`render_markdown` → `copy_to_clipboard` → 公众号后台 Cmd+V。
 
 ## 渲染参数
 
@@ -104,6 +85,7 @@ WorkBuddy 用户还需要去「连接器管理」页面右上角的自定义连�
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
+| `markdown` / `path` | 二选一 | Markdown 原文，或本地 `.md` 文件路径 |
 | `theme` | `default` | `default` 经典 / `grace` 优雅 / `simple` 简洁 |
 | `primaryColor` | `#0F4C81` | 主色，标题、强调、链接都跟它走 |
 | `fontFamily` | 系统字体栈 | 默认 PingFang / 微软雅黑 |
@@ -119,46 +101,50 @@ WorkBuddy 用户还需要去「连接器管理」页面右上角的自定义连�
 | `customCSS` | — | 追加自定义 CSS，优先级最高 |
 | `inline` | `true` | 是否内联全部样式（**粘进公众号时不要关**） |
 
-## 两个踩过的坑
+## 注意事项
 
-这两个坑不修，出来的 HTML 在微信里基本是「白板、无样式」，而且很难 debug——本地浏览器预览一切正常，只有粘进公众号才现形。
+**图片必须用 https。** 微信只接受 https 图片，Markdown 里的本地路径粘过去不会显示，需要先传图床。
 
-### 1. shadcn 变量在 Node 侧不存在
+**粘进公众号前别关 `inline`。** 关掉的话输出是 `<style>` + class 的形式，微信会把它们剥掉，正文只剩纯文本。
 
-`default.css` 和 `grace.css` 大量使用 `var(--foreground)`、`var(--muted-foreground)`、`var(--blockquote-background)`。这些变量定义在 Web 端的 `apps/web/src/assets/index.css`，浏览器里由 Tailwind 注入；Node 里直接渲染时一个都没有，`processCSS` 也无从解析。
+**手动跑命令可能需要 `env -u NODE_OPTIONS`。** 部分宿主（如 WorkBuddy）会往 `NODE_OPTIONS` 注入钩子，破坏 tsx 的 ESM loader，表现为启动即崩。`bin/md-mcp` 启动器内部已经处理了，但直接用 `npx tsx` 跑别的命令时要自己加：
 
-`cssNormalize.ts` 的 `shadcnVars()` 补了一套等价的 `:root` 声明，放在主题 CSS 之前参与变量解析。
+```bash
+env -u NODE_OPTIONS npx tsx test/smoke.ts
+```
 
-### 2. 微信不认 `hsl()` 和 `color-mix()`
+**Node 版本要 ≥ 20。** 启动器默认用 PATH 上的 node，想精确指定就设环境变量 `MD_SERVICE_NODE`。
 
-变量解析完之后剩下的是现代 CSS 写法：
+**`copy_to_clipboard` 只支持 macOS。** 它走 `osascript` 写 `public.html` flavor；其他系统没有 `osascript`，这个工具会直接报错。非 macOS 请用 `save_html` 或 `preview_html` 拿到 HTML 再手动处理。
 
-- `hsl(0 0% 3.9%)` — 空格分隔的新语法，微信直接丢弃
-- `color-mix(in srgb, #333 50%, transparent)` — 完全不支持
+**主题只有 3 套。** doocs/md 的 shared config 里就这 3 个 CSS。想要别的版式用 `customCSS` 叠加。
 
-`normalizeForWechat()` 把前者转成 `#rrggbb` / `rgba()`，把后者按 srgb 通道混合算出实际颜色字面量。
+**没有草稿箱发布。** 个人订阅号的接口权限通常拿不到，实测剪贴板粘贴更稳。
 
-**自检方式**：渲染结果里 `var(`、`hsl(`、`color-mix(`、`calc(`、`undefined` 这几个串的计数应该全是 0。`test/smoke.ts` 会打印这个计数。
+**改 `vendor/` 下的代码时注意 import 写法。** 为了精简，vendored 副本删掉了部分文件和入口，裸 `import '@md/shared'` 会失败，请用 `@md/shared/configs`、`@md/shared/types`、`@md/shared/utils` 这类子路径——上游 core 本来就是这么写的。上游版本与更新方式见 [vendor/doocs-md/UPSTREAM.md](vendor/doocs-md/UPSTREAM.md)。
 
-## 已知边界
+## 项目结构
 
-- **图片**：微信只吃 https 图片。Markdown 里的本地路径需要先传图床。
-- **主题数量**：内置只有 3 套（doocs/md 的 shared config 里就这 3 个 CSS）。想要别的版式用 `customCSS` 叠加。
-- **发布草稿箱**：没做。个人订阅号的接口权限通常拿不到，实测走剪贴板粘贴更稳。
-- **`copy_to_clipboard` 只支持 macOS**，走 `osascript` 写 `public.html` flavor。
+```
+├── vendor/doocs-md/   # 裁剪后的 doocs/md 渲染内核
+├── bin/md-mcp         # MCP 启动器
+├── run-mcp.mjs        # MCP 入口
+├── run-server.mjs     # HTTP 入口
+├── polyfill.mjs       # core 会碰到的浏览器 API 补丁
+├── src/               # 渲染管线、HTTP 接口、MCP 工具定义
+└── test/              # 冒烟测试与预览生成
+```
 
-## 测试
+## 常见用法
 
 ```bash
 npm test                                          # 渲染冒烟 + 代码块/表格
-npx tsx test/clipboard.ts                         # 验证剪贴板写入（会覆盖你的剪贴板）
+npx tsx test/clipboard.ts                         # 验证剪贴板写入（会覆盖剪贴板）
 npx tsx test/build-preview.ts <md> <out> <theme>  # 生成 375px 手机宽度预览页
 ```
-
-如果宿主往 `NODE_OPTIONS` 里注入过东西，手动跑这几个命令时前面加 `env -u NODE_OPTIONS`。
 
 ## 许可
 
 本项目 MIT。
 
-`vendor/doocs-md/` 下是 [doocs/md](https://github.com/doocs/md) 的代码（MIT，Copyright (c) Doocs），按原 license 重新分发。裁剪范围与更新方式见 [vendor/doocs-md/UPSTREAM.md](vendor/doocs-md/UPSTREAM.md)。
+`vendor/doocs-md/` 下是 [doocs/md](https://github.com/doocs/md) 的代码（MIT，Copyright (c) Doocs），按原 license 重新分发。
