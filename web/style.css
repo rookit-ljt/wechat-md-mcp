@@ -171,6 +171,13 @@ button.mini { padding: 4px 8px; font-size: 12px; }
   border-radius: 4px;
 }
 
+.pane-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .inline-toggle {
   font-weight: 400;
   font-size: 12px;
@@ -178,6 +185,7 @@ button.mini { padding: 4px 8px; font-size: 12px; }
   display: flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
 }
 
 /* ---------- editor ---------- */
@@ -314,4 +322,17 @@ button.mini { padding: 4px 8px; font-size: 12px; }
 
 @media (max-width: 620px) {
   #preview { height: 460px; }
+}
+
+/* Off-screen twin of the editor, used to measure where each block sits.
+   display:none would make it unmeasurable, so it is only moved out of view. */
+#mirror {
+  position: absolute;
+  top: 0;
+  left: -99999px;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }

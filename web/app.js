@@ -5,6 +5,8 @@ const $ = id => document.getElementById(id)
 const els = {
   editor: $('editor'),
   preview: $('preview'),
+  mirror: $('mirror'),
+  syncToggle: $('sync-scroll'),
   dirty: $('dirty'),
   filename: $('filename'),
   filepath: $('filepath'),
@@ -288,6 +290,275 @@ function bindToolbar() {
   })
 }
 
+/* ---------------- scroll sync ----------------
+ *
+ * The editor is a plain textarea (no per-line DOM) and the preview lives in an
+ * iframe, so neither side knows where the other's content sits. We measure both
+ * sides per markdown block and interpolate inside the block the viewport is in.
+ * Blocks are matched by index: the renderer emits exactly one top-level element
+ * per source block, verified against real articles.
+ */
+
+const SYNC_KEY = 'md-scroll-sync'
+const LEADER_MS = 200
+
+const sync = {
+  on: true,
+  mode: 'ratio',
+  src: null,   // { tops: [block0..blockN, end], ... }
+  prev: null,
+  leader: null,
+  leaderUntil: 0,
+  raf: 0,
+}
+
+/** Split markdown into top-level blocks; fenced code is never split. */
+function blocksOf(text) {
+  const out = []
+  let cur = []
+  let inCode = false
+  for (const line of text.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inCode = !inCode
+      cur.push(line)
+      continue
+    }
+    if (!inCode && !line.trim()) {
+      if (cur.length) {
+        out.push(cur.join('\n'))
+        cur = []
+      }
+      continue
+    }
+    cur.push(line)
+  }
+  if (cur.length)
+    out.push(cur.join('\n'))
+  return out
+}
+
+function previewWin() {
+  try {
+    return els.preview.contentWindow
+  }
+  catch {
+    return null
+  }
+}
+
+function previewDoc() {
+  try {
+    return els.preview.contentDocument
+  }
+  catch {
+    return null
+  }
+}
+
+/**
+ * Measure where each block sits inside the textarea. A textarea exposes no
+ * geometry for its text, so we replay the same text into a hidden mirror that
+ * copies every metric affecting layout, then read the anchors back.
+ */
+function measureEditorSide(blocks) {
+  const ta = els.editor
+  const m = els.mirror
+  const cs = getComputedStyle(ta)
+
+  m.style.width = `${ta.clientWidth}px`
+  m.style.boxSizing = 'border-box'
+  m.style.padding = cs.padding
+  for (const prop of [
+    'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontVariant',
+    'letterSpacing', 'wordSpacing', 'lineHeight', 'textTransform',
+    'textIndent', 'tabSize', 'direction',
+  ])
+    m.style[prop] = cs[prop]
+
+  m.textContent = ''
+  const spans = []
+  for (let i = 0; i < blocks.length; i++) {
+    if (i)
+      m.appendChild(document.createTextNode('\n\n'))
+    const span = document.createElement('span')
+    span.textContent = blocks[i]
+    m.appendChild(span)
+    spans.push(span)
+  }
+  if (!spans.length)
+    return null
+
+  const base = m.getBoundingClientRect().top + parseFloat(cs.paddingTop || 0)
+  const tops = spans.map(s => s.getBoundingClientRect().top - base)
+  const last = spans[spans.length - 1].getBoundingClientRect()
+  tops.push(last.bottom - base)
+  return { tops }
+}
+
+function measurePreviewSide() {
+  const w = previewWin()
+  const doc = previewDoc()
+  if (!w || !doc)
+    return null
+
+  const container = doc.querySelector('.container') || doc.body
+  // The renderer parks theme <style> tags inside the container; they are not
+  // content blocks and would break the one-to-one match with source blocks.
+  const skip = new Set(['STYLE', 'SCRIPT', 'LINK', 'META', 'TITLE'])
+  const kids = Array.from(container.children).filter(el => !skip.has(el.tagName))
+  const scrolled = w.scrollY || doc.documentElement.scrollTop || 0
+  const tops = kids.map(el => el.getBoundingClientRect().top + scrolled)
+  const lastBottom = kids.length
+    ? kids[kids.length - 1].getBoundingClientRect().bottom + scrolled
+    : 0
+
+  return {
+    tops,
+    lastBottom,
+    end: Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight || 0),
+    client: w.innerHeight || doc.documentElement.clientHeight,
+  }
+}
+
+let measureTimer = null
+
+function scheduleMeasure() {
+  clearTimeout(measureTimer)
+  measureTimer = setTimeout(measureAll, 150)
+}
+
+function measureAll() {
+  const blocks = blocksOf(els.editor.value)
+  sync.src = measureEditorSide(blocks)
+  const prev = measurePreviewSide()
+  sync.prev = prev
+
+  if (!sync.src || !prev) {
+    sync.mode = 'ratio'
+    return
+  }
+
+  // Both sides need tops.length === blocks.length + 1 for index pairing.
+  const matched = prev.tops.length === blocks.length
+  if (prev.tops.length)
+    prev.tops.push(prev.lastBottom)
+  sync.mode = matched ? 'block' : 'ratio'
+}
+
+/** Map a scroll position across sides by piecewise interpolation per block. */
+function mapTop(y, from, to) {
+  const n = from.tops.length - 1
+  if (n <= 0)
+    return 0
+
+  let lo = 0
+  let hi = n
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (from.tops[mid + 1] <= y)
+      lo = mid + 1
+    else
+      hi = mid
+  }
+  const i = Math.min(lo, n - 1)
+  const a = from.tops[i]
+  const b = from.tops[i + 1]
+  const r = b > a ? Math.min(1, Math.max(0, (y - a) / (b - a))) : 0
+  return to.tops[i] + r * (to.tops[i + 1] - to.tops[i])
+}
+
+function maxScroll(el) {
+  return Math.max(0, el.scrollHeight - el.clientHeight)
+}
+
+function applySync(source) {
+  if (!sync.src || !sync.prev)
+    return
+
+  const w = previewWin()
+  if (!w)
+    return
+
+  const srcMax = maxScroll(els.editor)
+  const prevMax = Math.max(0, sync.prev.end - sync.prev.client)
+
+  if (source === 'editor') {
+    const y = els.editor.scrollTop
+    const raw = sync.mode === 'block'
+      ? mapTop(y, sync.src, sync.prev)
+      : (srcMax > 0 ? y / srcMax * prevMax : 0)
+    // Scroll-to-bottom should land on the other side's bottom, not short of it.
+    const target = srcMax > 0 && y >= srcMax * 0.98
+      ? prevMax
+      : Math.min(prevMax, Math.max(0, raw))
+    w.scrollTo(0, target)
+  }
+  else {
+    const y = w.scrollY
+    const raw = sync.mode === 'block'
+      ? mapTop(y, sync.prev, sync.src)
+      : (prevMax > 0 ? y / prevMax * srcMax : 0)
+    const target = prevMax > 0 && y >= prevMax * 0.98
+      ? srcMax
+      : Math.min(srcMax, Math.max(0, raw))
+    els.editor.scrollTop = target
+  }
+}
+
+/**
+ * Whoever scrolls first owns the sync for a short window. Without this the two
+ * sides keep re-triggering each other and the scroll fights itself.
+ */
+function requestSync(source) {
+  if (!sync.on)
+    return
+  const now = performance.now()
+  if (sync.leader && sync.leader !== source && now < sync.leaderUntil)
+    return
+  sync.leader = source
+  sync.leaderUntil = now + LEADER_MS
+  if (sync.raf)
+    return
+  sync.raf = requestAnimationFrame(() => {
+    sync.raf = 0
+    applySync(source)
+  })
+}
+
+function onPreviewLoad() {
+  const w = previewWin()
+  if (w)
+    w.addEventListener('scroll', () => requestSync('preview'), { passive: true })
+
+  // Images settle after load and push content down, so measure again.
+  const doc = previewDoc()
+  if (doc) {
+    for (const img of Array.from(doc.images)) {
+      if (!img.complete)
+        img.addEventListener('load', scheduleMeasure, { once: true })
+    }
+  }
+  scheduleMeasure()
+}
+
+function initSync() {
+  sync.on = localStorage.getItem(SYNC_KEY) !== 'off'
+  els.syncToggle.checked = sync.on
+
+  els.syncToggle.addEventListener('change', () => {
+    sync.on = els.syncToggle.checked
+    localStorage.setItem(SYNC_KEY, sync.on ? 'on' : 'off')
+    if (sync.on) {
+      measureAll()
+      applySync('editor')
+    }
+  })
+
+  els.editor.addEventListener('scroll', () => requestSync('editor'), { passive: true })
+  els.preview.addEventListener('load', onPreviewLoad)
+  window.addEventListener('resize', scheduleMeasure)
+}
+
 /* ---------------- wiring ---------------- */
 
 function bindGlobal() {
@@ -369,6 +640,7 @@ async function main() {
   bindConfig()
   bindToolbar()
   bindGlobal()
+  initSync()
   maybeShowAgentBanner()
 
   try {

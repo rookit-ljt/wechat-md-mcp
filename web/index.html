@@ -55,10 +55,16 @@
   <section class="pane preview-pane">
     <div class="pane-head">
       <span>预览</span>
-      <label class="inline-toggle">
-        <input type="checkbox" id="inline-mode">
-        内联模式（看真实粘贴效果）
-      </label>
+      <div class="pane-actions">
+        <label class="inline-toggle">
+          <input type="checkbox" id="sync-scroll" checked>
+          滚动同步
+        </label>
+        <label class="inline-toggle">
+          <input type="checkbox" id="inline-mode">
+          内联模式
+        </label>
+      </div>
     </div>
     <div class="phone">
       <iframe id="preview" title="预览"></iframe>
@@ -130,6 +136,8 @@
   </section>
 
 </main>
+
+<div id="mirror" aria-hidden="true"></div>
 
 <script src="/web/app.js"></script>
 </body>
